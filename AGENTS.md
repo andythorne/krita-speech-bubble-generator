@@ -2,12 +2,28 @@
 
 ## Project layout
 
-- `krita_speech_bubble_generator/krita_speech_bubble_generator.py`: dock UI,
-  saved settings, selection tracking and canvas editing.
-- `bubble_geometry.py` and `bubble_preview.py` in the package: shared vector
-  geometry and interactive preview.
-- `canvas_context.py`: canvas transforms and background snapshots.
-- `tests/test_bubbles.py`: Qt regression tests with a substitute Krita host.
+- `krita_speech_bubble_generator/krita_speech_bubble_generator.py`: thin docker
+  composition and lifecycle shell.
+- `bubbles/`: immutable settings/codec, polymorphic bubble types, composed
+  shouting strategies, registries, geometry primitives, and shared rendering.
+- `editor/`: UI, orchestration, service contracts, session values, interactive
+  preview, and local input helpers.
+- `krita_host/`: native document operations, selection resolution, canvas
+  transforms, and background snapshots.
+- `tests/`: contract, geometry, service, UI, and fake-host workflow coverage.
+
+## Architectural constraints
+
+Program to interfaces, use polymorphism for interchangeable behavior, and compose
+collaborators at bootstrap. Use `BubbleType` subclasses and compose a
+`ShoutingAlgorithm` into `ShoutingBubble`. Do not bypass these interfaces with
+concrete-type or style-name dispatch elsewhere. Keep shared mechanics DRY.
+
+Add no dependencies of any kind: runtime, development, tests, build, packaging,
+or CI. Use only the standard library and existing PyQt5/Krita APIs. Do not upgrade
+packages, vendor libraries, or raise the minimum Python version.
+
+See `CONTRIBUTING.md` for module ownership and extension guidance.
 
 ## Compatibility and editing
 

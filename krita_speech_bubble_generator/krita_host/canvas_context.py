@@ -1,8 +1,13 @@
+from typing import List, Optional, Tuple
+
 from PyQt5.QtCore import QRectF
-from PyQt5.QtGui import QTransform
+from PyQt5.QtGui import QImage, QTransform
+
+from .contracts import Document, Node, Shape
 
 
-def canvas_transform(document, baseline, shape):
+def canvas_transform(document: Document, baseline: QTransform,
+                     shape: Shape) -> QTransform:
     inverse, invertible = baseline.inverted()
     if not invertible:
         raise ValueError("The saved bubble transform is not invertible")
@@ -20,8 +25,9 @@ def canvas_transform(document, baseline, shape):
     return transform
 
 
-def canvas_snapshot(document, layer, shape_name=None):
-    path = []
+def canvas_snapshot(document: Document, layer: Node,
+                    shape_name: Optional[str] = None) -> Tuple[QImage, QRectF]:
+    path: List[int] = []
     node = layer
     parent = node.parentNode()
     while parent is not None:

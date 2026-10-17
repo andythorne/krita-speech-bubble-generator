@@ -23,6 +23,85 @@ For local development, copy or link the package directory and
 `pykrita` directory. Disable other installed copies so you know which version
 you are using. Restart Krita after changing Python source.
 
+### Architecture
+
+Program to small interfaces, implement interchangeable behavior polymorphically,
+and compose collaborators. Keep shared mathematics and values simple; do not
+duplicate algorithms or introduce inheritance merely to move code between files.
+
+The package has three responsibility-based subpackages: `bubbles/` describes and
+renders bubbles, `editor/` coordinates interaction, and `krita_host/` accesses
+native documents. Keep their `__init__.py` files free of eager imports; the
+existing root bootstrap and public docker module remain the entry points.
+
+| Module | Responsibility |
+| --- | --- |
+| `krita_speech_bubble_generator.py` | Thin docker shell, dependency composition, and Krita lifecycle forwarding. |
+| `editor/view.py` | Qt controls, local input behavior, and semantic edit signals. |
+| `editor/presenter.py` | Editor transitions, pending edits, selection polling, and background scheduling. |
+| `editor/contracts.py` | View, rendering, and document-access contracts. |
+| `editor/state.py` | Explicit editing target and session values. |
+| `bubbles/settings.py` | Immutable editable settings and version-1 saved-record validation/encoding. |
+| `bubbles/renderer.py` | Text measurement/wrapping and the shared preview/export pipeline. |
+| `bubbles/types.py` | `BubbleType` interface and the five bubble implementations. |
+| `bubbles/shouting_algorithms.py` | `ShoutingAlgorithm` interface and the four contour implementations. |
+| `bubbles/registry.py` | Ordered built-in implementations and identifier lookup. |
+| `bubbles/geometry.py` | Shared path, tail, and SVG mathematics. |
+| `krita_host/gateway.py` | Native document reads/writes, selection resolution, annotations, and placement. |
+| `krita_host/canvas_context.py` | Canvas transforms and temporary background snapshots. |
+| `editor/preview.py` | Preview drawing, coordinate mapping, and tail-handle input. |
+| `editor/text_resize_handle.py`, `editor/wheel_guard.py` | Local text-resize and scroll interactions. |
+
+The presenter consumes contracts, not concrete controls or native shapes.
+Dependencies are assembled by the docker shell. Geometry implementations must not
+read widgets, documents, or global random state. UI events carry settings
+snapshots; rendering never generates a new pattern seed.
+
+#### Add a bubble type or shouting algorithm
+
+Implement `BubbleType` or `ShoutingAlgorithm` and add the implementation to the
+appropriate explicit registry. A shouting bubble composes its selected algorithm;
+do not create a separate bubble subclass for every algorithm. Keep identifiers
+stable because they are saved in documents. Selector order and available
+implementations come from the registries, and conditional controls use capability
+metadata rather than checks for concrete classes or style names.
+
+Reuse common enclosure sizing, seeded spike generation, tail construction, and
+SVG output. Distinct strategies can supply different parameters to shared
+mechanics without copying the entire algorithm. Preserve random draw order when
+refactoring: a saved seed must continue producing the same outline.
+
+Add contract coverage for each implementation, and specific geometry coverage
+where its behavior differs. A new persisted option may also require settings,
+codec, and UI changes; adding an implementation must not require editing central
+renderer or document-write conditionals.
+
+#### Preserve document and editing contracts
+
+Keep `rsbg-bubble`, `rsbg-bubble-<id>`, the `rsbg-bubble-` annotation prefix, and the
+version-1 record format compatible. Fresh editor defaults and defaults for missing
+legacy fields are deliberately different; do not merge them. Normalize old
+records before loading controls, without mutating the caller's data.
+
+Pending edits belong to an explicit document/layer/group target. Reconcile
+selection before a delayed write, preserve eligible edits to the previous target,
+and never redirect them to the newly selected bubble or document. Failed writes
+must not advance the successfully applied settings. Updates on shared layers
+must retain sibling artwork, stacking, selection, and canvas transforms.
+
+Keep Qt timers parented to the owning objects and on the GUI thread. Hide-time
+flushing, canceled background work, and programmatic-load signal suppression are
+part of the editing contract, not incidental implementation details.
+
+#### Dependencies
+
+**Do not add dependencies.** This applies to runtime, development, testing,
+building, packaging, and CI, including optional or vendored libraries. Use the
+standard library and the existing PyQt5/Krita APIs; no framework, package upgrade,
+runtime download, or minimum-Python-version increase is needed for this
+architecture. Use `abc`, `typing`, `dataclasses`, and the existing `unittest` runner
+instead of adding interface, injection, serialization, or architecture tools.
+
 ### Build an installable ZIP
 
 With Python 3.9 or newer, run from the repository root:
@@ -52,6 +131,33 @@ QT_QPA_PLATFORM=offscreen python3 -m unittest discover -s tests
 
 The tests use real Qt rendering and input handling with a substitute Krita host.
 They do not require Krita, but do not replace trying changes in the application.
+
+### VS Code and strict typing
+
+Use a repository-local environment for the plugin's existing PyQt5 requirement:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install PyQt5
+```
+
+In VS Code, run **Python: Select Interpreter** and select `.venv/bin/python`.
+The workspace defaults to this interpreter, and `pyrightconfig.json` enables
+strict analysis of the plugin source. PyQt5 includes its own type declarations;
+the small declarations under `stubs/krita/` describe only the native Krita API
+used by the bootstrap. They are development-only and are not packaged with the
+plugin. The two native imports suppress only `reportMissingModuleSource` because
+Krita supplies their implementation inside the application, not in `.venv`.
+Native document operations are described by structural contracts in
+`krita_host/contracts.py`, while editor sessions retain opaque host identities.
+Keep these declarations consistent with the Krita APIs actually used; do not
+replace unresolved imports or missing annotations with blanket suppressions.
+
+Run the existing suite using the same interpreter:
+
+```sh
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests
+```
 
 ### Try changes in Krita
 

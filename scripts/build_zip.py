@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = "krita_speech_bubble_generator"
 
 
-def build_zip(output):
+def build_zip(output: Path) -> Path:
     package = ROOT / PLUGIN
     files = [ROOT / f"{PLUGIN}.desktop", ROOT / "LICENSE"]
     files.extend(
@@ -40,7 +40,7 @@ def build_zip(output):
     return output
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",

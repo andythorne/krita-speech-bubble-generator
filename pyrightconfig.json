@@ -1,0 +1,7 @@
+{
+    "include": ["krita_speech_bubble_generator", "scripts"],
+    "typeCheckingMode": "strict",
+    "venvPath": ".",
+    "venv": ".venv",
+    "stubPath": "stubs"
+}

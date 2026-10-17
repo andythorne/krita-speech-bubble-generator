@@ -33,6 +33,23 @@ class BuildZipTests(unittest.TestCase):
                 )
                 self.assertTrue(archive.getinfo(directory).is_dir())
                 self.assertIn(f"{directory}__init__.py", archive.namelist())
+                for module in (
+                    "bubbles/__init__", "bubbles/settings", "bubbles/renderer",
+                    "bubbles/types", "bubbles/shouting_algorithms",
+                    "bubbles/registry", "bubbles/geometry",
+                    "editor/__init__", "editor/state", "editor/contracts",
+                    "editor/view", "editor/presenter", "editor/preview",
+                    "editor/text_resize_handle", "editor/wheel_guard",
+                    "krita_host/__init__", "krita_host/gateway",
+                    "krita_host/canvas_context", "krita_speech_bubble_generator",
+                ):
+                    self.assertIn(f"{directory}{module}.py", archive.namelist())
+                self.assertEqual(
+                    {name for name in archive.namelist()
+                     if name.startswith(directory) and name.endswith(".py")
+                     and "/" not in name[len(directory):]},
+                    {f"{directory}__init__.py",
+                     f"{directory}krita_speech_bubble_generator.py"})
                 self.assertIn("LICENSE", archive.namelist())
                 self.assertIsNone(archive.testzip())
                 for name in archive.namelist():

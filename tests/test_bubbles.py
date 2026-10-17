@@ -1,638 +1,35 @@
+"""Editor workflows spanning the real Qt view and substitute native host."""
+
 import json
 import math
 import os
-import sys
-import types
 import unittest
 import xml.etree.ElementTree as ET
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QUuid
-from PyQt5.QtGui import QColor, QFontDatabase, QImage, QPainter, QTransform, QWheelEvent
+from PyQt5.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt
+from PyQt5.QtGui import QColor, QFontDatabase, QImage, QTransform, QWheelEvent
 from PyQt5.QtTest import QTest
-from PyQt5.QtWidgets import QApplication, QCheckBox, QDockWidget, QPushButton
+from PyQt5.QtWidgets import QApplication, QCheckBox, QPushButton
 
+from fake_krita import APP, FakeDocument, FakeKrita, FakeLayer, FakeShape
 
-class FakeKrita:
-    document = None
-
-    @classmethod
-    def instance(cls):
-        return cls
-
-    @classmethod
-    def activeDocument(cls):
-        return cls.document
-
-    @classmethod
-    def addDockWidgetFactory(cls, factory):
-        pass
-
-
-# Only the Krita host is substituted; rendering, fonts and mouse events use Qt.
-krita = types.ModuleType("krita")
-krita.Krita = FakeKrita
-krita.DockWidget = QDockWidget
-krita.DockWidgetFactory = lambda *args: None
-krita.DockWidgetFactoryBase = types.SimpleNamespace(DockRight=0)
-sys.modules["krita"] = krita
-
-from krita_speech_bubble_generator.bubble_geometry import (
-    SHOUTING_SHAPES, STYLES, body_path, bubble_path, outline_anchor, path_data, tail_tip,
+from krita_speech_bubble_generator.bubbles.geometry import (
+    body_path, outline_anchor, tail_tip,
 )
+from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 from krita_speech_bubble_generator.krita_speech_bubble_generator import (
-    SpeechBubbleDocker, SHAPE_NAME,
+    SpeechBubbleDocker,
 )
-from krita_speech_bubble_generator.bubble_preview import BubblePreview
-from krita_speech_bubble_generator.canvas_context import canvas_snapshot, canvas_transform
+from krita_speech_bubble_generator.bubbles.settings import SHAPE_NAME
+from editor_harness import EditorHarness
+from krita_speech_bubble_generator.krita_host.canvas_context import canvas_transform
 
 
-APP = QApplication.instance() or QApplication([])
-
-
-class FakeShape:
-    def __init__(self, layer, baseline):
-        self.layer = layer
-        self.matrix = baseline
-        self.shape_name = SHAPE_NAME
-        self.selected = False
-        self.z_index = 0
-        self.is_visible = True
-
-    def isSelected(self):
-        return self.selected
-
-    def select(self):
-        self.selected = True
-
-    def deselect(self):
-        self.selected = False
-
-    def zIndex(self):
-        return self.z_index
-
-    def setZIndex(self, value):
-        self.z_index = value
-
-    def setVisible(self, visible):
-        self.is_visible = visible
-
-    def children(self):
-        return []
-
-    def type(self):
-        return "groupshape"
-
-    def name(self):
-        return self.shape_name
-
-    def setName(self, name):
-        self.shape_name = name
-
-    def transformation(self):
-        return QTransform(self.matrix)
-
-    def absoluteTransformation(self):
-        return self.transformation()
-
-    def boundingBox(self):
-        return self.matrix.mapRect(QRectF(-10, -20, 200, 120))
-
-    def setTransformation(self, matrix):
-        self.matrix = QTransform(matrix)
-        self.layer.events.append("transform")
-
-    def updateAbsolute(self, bounds):
-        self.layer.events.append(("dirty", QRectF(bounds)))
-
-    def update(self):
-        self.layer.events.append("shape-update")
-
-    def remove(self):
-        self.layer.items.remove(self)
-        self.layer.events.append("remove")
-        return True
-
-
-class FakeLayer:
-    def __init__(self):
-        self.identifier = QUuid.createUuid()
-        self.items = []
-        self.is_locked = False
-        self.fail_import = False
-        self.events = []
-
-    def uniqueId(self):
-        return self.identifier
-
-    def name(self):
-        return "Test bubble"
-
-    def type(self):
-        return "vectorlayer"
-
-    def locked(self):
-        return self.is_locked
-
-    def remove(self):
-        self.removed = True
-        return True
-
-    def shapes(self):
-        return list(self.items)
-
-    def addShapesFromSvg(self, svg):
-        if self.fail_import:
-            return []
-        root = ET.fromstring(svg)
-        path = root.find(".//{http://www.w3.org/2000/svg}path")
-        # Vary the initial group normalization as the outline changes.
-        baseline = QTransform.fromTranslate(-len(path.attrib["d"]) / 100, -7)
-        shape = FakeShape(self, baseline)
-        self.items.append(shape)
-        return [shape]
-
-
-class FakeDocument:
-    def __init__(self, layer):
-        self.layer = layer
-        self.annotations = {}
-        self.events = []
-        self.layers = {}
-        if layer:
-            layer.events = self.events
-            self.layers[layer.uniqueId().toString()] = layer
-
-    def activeNode(self):
-        return self.layer
-
-    def rootNode(self):
-        return self
-
-    def createVectorLayer(self, name):
-        self.layer = FakeLayer()
-        self.layer.events = self.events
-        self.layers[self.layer.uniqueId().toString()] = self.layer
-        return self.layer
-
-    def addChildNode(self, layer, above):
-        return True
-
-    def setActiveNode(self, layer):
-        self.layer = layer
-
-    def annotation(self, key):
-        return self.annotations.get(key, QByteArray())
-
-    def setAnnotation(self, key, description, value):
-        self.annotations[key] = value
-
-    def nodeByUniqueID(self, identifier):
-        return self.layers.get(identifier.toString()) if identifier is not None else None
-
-    def refreshProjection(self):
-        self.events.append("projection")
-
-    def waitForDone(self):
-        self.events.append("wait")
-
-    def xRes(self):
-        return 300
-
-    def yRes(self):
-        return 300
-
-
-class GeometryTests(unittest.TestCase):
-    @staticmethod
-    def shouting_vertices(path, rect):
-        def point(index):
-            element = path.elementAt(index)
-            return QPointF((element.x - rect.center().x()) * 2 / rect.width(),
-                           (element.y - rect.center().y()) * 2 / rect.height())
-
-        stride = 6 if path.elementAt(1).isCurveTo() else 2
-        count = (path.elementCount() - 1) // stride
-        return ([point(i * stride) for i in range(count)],
-                [point(i * stride + stride // 2) for i in range(count)])
-
-    def test_tails_connect_in_every_direction(self):
-        rect = QRectF(0, 0, 240, 100)
-        for style in STYLES:
-            body = body_path(rect, style)
-            for degrees in range(0, 360, 5):
-                with self.subTest(style=style, degrees=degrees):
-                    angle = math.radians(degrees)
-                    tip = tail_tip(body, rect.center(), angle, 60)
-                    direction = QPointF(math.cos(angle), math.sin(angle))
-                    anchor = outline_anchor(body, rect.center(), direction)
-                    self.assertAlmostEqual(
-                        math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y()), 60)
-                    self.assertFalse(body.contains(tip))
-                    path = bubble_path(body, rect.center(), tip, style, 14)
-                    self.assertTrue(path.contains(rect.center()))
-                    if style != "Thought":
-                        for fraction in (0.01, 0.2, 0.5, 0.9):
-                            self.assertTrue(path.contains(anchor + (tip - anchor) * fraction))
-                    else:
-                        for fraction in (0.25, 0.58, 0.87):
-                            self.assertTrue(path.contains(anchor + (tip - anchor) * fraction))
-
-    def test_no_tail_does_not_change_body(self):
-        for style in STYLES:
-            body = body_path(QRectF(0, 0, 240, 100), style)
-            self.assertEqual(bubble_path(body, QPointF(120, 50), None, style, 14), body)
-            self.assertEqual(bubble_path(body, QPointF(120, 50), QPointF(120, 50), style, 14), body)
-
-    def test_styles_have_distinct_outlines(self):
-        paths = [body_path(QRectF(0, 0, 240, 100), style) for style in STYLES]
-        for i, path in enumerate(paths):
-            for other in paths[i + 1:]:
-                self.assertNotEqual(path, other)
-
-    def test_svg_contours_are_closed_for_consistent_outline_joins(self):
-        for style in STYLES:
-            body = body_path(QRectF(0, 0, 240, 100), style)
-            tip = tail_tip(body, QPointF(120, 50), 0.7, 60)
-            path = bubble_path(body, QPointF(120, 50), tip, style, 14)
-            self.assertTrue(path_data(path).endswith("Z"))
-
-    def test_oval_and_rounded_rectangle_have_different_corners(self):
-        rect = QRectF(0, 0, 240, 100)
-        corner = QPointF(15, 15)
-        self.assertTrue(body_path(rect, "Rounded", 20).contains(corner))
-        self.assertFalse(body_path(rect, "Oval").contains(corner))
-
-    def test_thought_blob_size_increases_radius_without_holes(self):
-        rect = QRectF(0, 0, 240, 100)
-        body = body_path(rect, "Thought")
-        tip = tail_tip(body, rect.center(), 0, 100)
-        anchor = outline_anchor(body, rect.center(), QPointF(1, 0))
-        first_center = anchor + (tip - anchor) * 0.25
-        small = bubble_path(body, rect.center(), tip, "Thought", 14, 100)
-        large = bubble_path(body, rect.center(), tip, "Thought", 14, 400)
-        edge = first_center + QPointF(0, 10)
-        self.assertFalse(small.contains(edge))
-        self.assertTrue(large.contains(edge))
-        self.assertTrue(large.contains(first_center))
-
-    def test_shouting_randomness_is_stable_seeded_and_adjustable(self):
-        rect = QRectF(0, 0, 240, 100)
-        regular = body_path(rect, "Shouting", irregularity=0, seed=17)
-        self.assertEqual(regular, body_path(rect, "Shouting", irregularity=0, seed=99))
-        low = body_path(rect, "Shouting", irregularity=25, seed=17)
-        high = body_path(rect, "Shouting", irregularity=100, seed=17)
-        self.assertEqual(high, body_path(rect, "Shouting", irregularity=100, seed=17))
-        self.assertNotEqual(high, body_path(rect, "Shouting", irregularity=100, seed=99))
-        self.assertNotEqual(low, high)
-        low_tips, _ = self.shouting_vertices(low, rect)
-        high_tips, _ = self.shouting_vertices(high, rect)
-        low_radii = [math.hypot(point.x(), point.y()) for point in low_tips]
-        high_radii = [math.hypot(point.x(), point.y()) for point in high_tips]
-        self.assertGreater(max(high_radii) - min(high_radii), max(low_radii) - min(low_radii))
-        for seed in range(5):
-            body = body_path(rect, "Shouting", irregularity=100, seed=seed)
-            for degrees in range(0, 360, 15):
-                tip = tail_tip(body, rect.center(), math.radians(degrees), 60)
-                path = bubble_path(body, rect.center(), tip, "Shouting", 14)
-                self.assertTrue(path.contains(rect.center()))
-
-    def test_shouting_randomizes_spacing_with_tightly_bounded_heights_and_valleys(self):
-        rect = QRectF(0, 0, 240, 100)
-        for amount in (0, 25, 50, 79, 100):
-            for seed in range(100):
-                with self.subTest(amount=amount, seed=seed):
-                    body = body_path(rect, "Shouting", irregularity=amount, seed=seed)
-                    tips, valleys = self.shouting_vertices(body, rect)
-                    radii = [math.hypot(point.x(), point.y()) for point in tips]
-                    valley_radii = [math.hypot(point.x(), point.y()) for point in valleys]
-                    variation = amount / 100
-                    self.assertGreaterEqual(min(radii), 1.25 - 0.025 * variation - 1e-9)
-                    self.assertLessEqual(max(radii), 1.25 + 0.025 * variation + 1e-9)
-                    self.assertGreaterEqual(min(valley_radii), 1.02 - 0.01 * variation - 1e-9)
-                    self.assertLessEqual(max(valley_radii), 1.02 + 0.01 * variation + 1e-9)
-                    widths = []
-                    for i, tip in enumerate(tips):
-                        angle = math.atan2(tip.y(), tip.x())
-                        left = valleys[i - 1]
-                        right = valleys[i]
-                        incoming = (angle - math.atan2(left.y(), left.x())) % (2 * math.pi)
-                        outgoing = (math.atan2(right.y(), right.x()) - angle) % (2 * math.pi)
-                        widths.append(incoming + outgoing)
-                        self.assertAlmostEqual(incoming, outgoing)
-                    self.assertLessEqual(max(widths) / min(widths),
-                                         (1 + 0.35 * variation) / (1 - 0.35 * variation) + 1e-9)
-                    if amount:
-                        self.assertGreater(max(widths) - min(widths), 0.02 * variation)
-                        self.assertGreater(max(radii) - min(radii), 0.02 * variation)
-                        self.assertGreater(max(valley_radii) - min(valley_radii), 0.01 * variation)
-
-    def test_shouting_spikes_do_not_fold_or_cross_at_any_aspect_ratio(self):
-        for width, height in ((240, 100), (100, 240), (1000, 10), (10, 1000)):
-            rect = QRectF(0, 0, width, height)
-            for amount in (0, 50, 100):
-                for shape in SHOUTING_SHAPES:
-                    for seed in (0, 17, 99, 1729):
-                        with self.subTest(width=width, height=height, amount=amount,
-                                          shape=shape, seed=seed):
-                            body = body_path(rect, "Shouting", irregularity=amount, seed=seed,
-                                             shouting_shape=shape)
-                            polygons = body.toSubpathPolygons()
-                            self.assertEqual(len(polygons), 1)
-                            points = [QPointF((point.x() - rect.center().x()) * 2 / width,
-                                              (point.y() - rect.center().y()) * 2 / height)
-                                      for point in polygons[0]]
-                            sweep = 0
-                            for left, right in zip(points, points[1:]):
-                                angle = math.atan2(left.x() * right.y() - left.y() * right.x(),
-                                                   left.x() * right.x() + left.y() * right.y())
-                                self.assertGreaterEqual(angle, -1e-9)
-                                sweep += angle
-                            self.assertAlmostEqual(sweep, 2 * math.pi)
-
-    def test_shouting_shapes_are_distinct_seeded_and_have_bounded_spikes(self):
-        rect = QRectF(0, 0, 240, 100)
-        paths = [body_path(rect, "Shouting", irregularity=79, seed=17, shouting_shape=shape)
-                 for shape in SHOUTING_SHAPES]
-        for i, path in enumerate(paths):
-            for other in paths[i + 1:]:
-                self.assertNotEqual(path, other)
-        for shape in SHOUTING_SHAPES:
-            regular = body_path(rect, "Shouting", irregularity=0, seed=17, shouting_shape=shape)
-            self.assertEqual(regular, body_path(
-                rect, "Shouting", irregularity=0, seed=99, shouting_shape=shape))
-            for amount in (50, 79, 100):
-                for seed in range(20):
-                    with self.subTest(shape=shape, amount=amount, seed=seed):
-                        body = body_path(rect, "Shouting", irregularity=amount, seed=seed,
-                                         shouting_shape=shape)
-                        self.assertEqual(body, body_path(
-                            rect, "Shouting", irregularity=amount, seed=seed, shouting_shape=shape))
-                        self.assertNotEqual(body, body_path(
-                            rect, "Shouting", irregularity=amount, seed=seed + 1,
-                            shouting_shape=shape))
-                        tips, valleys = self.shouting_vertices(body, rect)
-                        self.assertEqual(len(tips), 18 if shape == "Punchy" else 24)
-                        for tip in tips:
-                            radius = math.hypot(tip.x(), tip.y())
-                            self.assertGreaterEqual(radius, 1.135 - 1e-9)
-                            self.assertLessEqual(radius, 1.285 + 1e-9)
-                        for valley in valleys:
-                            radius = math.hypot(valley.x(), valley.y())
-                            self.assertGreaterEqual(radius, 1.01 - 1e-9)
-                            self.assertLessEqual(radius, 1.03 + 1e-9)
-                        self.assertTrue(path_data(body).endswith("Z"))
-                        if shape == "Angular":
-                            self.assertIn("L", path_data(body))
-                            self.assertNotIn("C", path_data(body))
-                        else:
-                            self.assertIn("C", path_data(body))
-                            self.assertNotIn("L", path_data(body))
-
-    def test_expressive_shouting_has_gentle_bounded_lean(self):
-        rect = QRectF(0, 0, 240, 100)
-        for seed in range(20):
-            body = body_path(rect, "Shouting", irregularity=100, seed=seed,
-                             shouting_shape="Expressive")
-            tips, valleys = self.shouting_vertices(body, rect)
-            leans = []
-            for i, tip in enumerate(tips):
-                angle = math.atan2(tip.y(), tip.x())
-                left, right = valleys[i - 1], valleys[i]
-                incoming = (angle - math.atan2(left.y(), left.x())) % (2 * math.pi)
-                outgoing = (math.atan2(right.y(), right.x()) - angle) % (2 * math.pi)
-                leans.append(abs(incoming - outgoing) / (incoming + outgoing))
-            self.assertGreater(max(leans), 0.1)
-            self.assertLessEqual(max(leans), 0.2 + 1e-9)
-
-    def test_all_shouting_shapes_keep_tails_connected(self):
-        for shape in SHOUTING_SHAPES:
-            rect = QRectF(0, 0, 240, 100)
-            body = body_path(rect, "Shouting", irregularity=100, seed=17,
-                             shouting_shape=shape)
-            for degrees in range(0, 360, 5):
-                angle = math.radians(degrees)
-                direction = QPointF(math.cos(angle), math.sin(angle))
-                anchor = outline_anchor(body, rect.center(), direction)
-                tip = tail_tip(body, rect.center(), angle, 60)
-                path = bubble_path(body, rect.center(), tip, "Shouting", 14)
-                self.assertAlmostEqual(math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y()), 60)
-                for fraction in (0.01, 0.2, 0.5, 0.9):
-                    self.assertTrue(path.contains(anchor + (tip - anchor) * fraction))
-
-    def test_unknown_shouting_shape_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "Unknown shouting shape"):
-            body_path(QRectF(0, 0, 240, 100), "Shouting", shouting_shape="Unknown")
-
-    def test_shouting_nodes_control_the_exact_spike_count_for_every_shape(self):
-        rect = QRectF(0, 0, 240, 100)
-        for shape in SHOUTING_SHAPES:
-            previous = None
-            for nodes in (8, 12, 24, 64):
-                with self.subTest(shape=shape, nodes=nodes):
-                    body = body_path(rect, "Shouting", irregularity=100, seed=17,
-                                     shouting_shape=shape, nodes=nodes)
-                    tips, valleys = self.shouting_vertices(body, rect)
-                    self.assertEqual(len(tips), nodes)
-                    self.assertEqual(len(valleys), nodes)
-                    self.assertNotEqual(body, previous)
-                    self.assertEqual(body, body_path(
-                        rect, "Shouting", irregularity=100, seed=17,
-                        shouting_shape=shape, nodes=nodes))
-                    self.assertTrue(path_data(body).endswith("Z"))
-                    previous = body
-
-    def test_thought_nodes_add_scaled_lobes_and_keep_the_cloud_connected(self):
-        rect = QRectF(0, 0, 240, 100)
-        geometry_module = sys.modules[body_path.__module__]
-        for nodes in (8, 16, 32, 64):
-            with self.subTest(nodes=nodes):
-                with patch.object(geometry_module, "ellipse_path",
-                                  wraps=geometry_module.ellipse_path) as lobe:
-                    body = body_path(rect, "Thought", irregularity=79, seed=17, nodes=nodes)
-                    self.assertEqual(lobe.call_count, nodes)
-                    for call in lobe.call_args_list:
-                        self.assertLessEqual(call.args[1], 0.24 * 16 / nodes * 1.5)
-                        self.assertLessEqual(call.args[2], 0.30 * 16 / nodes * 1.5)
-                self.assertEqual(body, body_path(
-                    rect, "Thought", irregularity=79, seed=17, nodes=nodes))
-                self.assertEqual(len(body.toSubpathPolygons()), 1)
-                for degrees in range(0, 360, 5):
-                    angle = math.radians(degrees)
-                    point = rect.center() + QPointF(
-                        rect.width() * 0.495 * math.cos(angle),
-                        rect.height() * 0.495 * math.sin(angle))
-                    self.assertTrue(body.contains(point))
-
-    def test_invalid_node_counts_are_rejected(self):
-        for style in ("Thought", "Shouting"):
-            for nodes in (0, 7, 65, -1, 16.5, True, "16"):
-                with self.subTest(style=style, nodes=nodes):
-                    with self.assertRaisesRegex(ValueError, "Invalid node count"):
-                        body_path(QRectF(0, 0, 240, 100), style, nodes=nodes)
-
-    def test_shouting_has_smooth_curved_valleys_and_sharp_tips(self):
-        body = body_path(QRectF(0, 0, 240, 100), "Shouting", irregularity=100, seed=17)
-        self.assertIn("C", path_data(body))
-        self.assertNotIn("L", path_data(body))
-        self.assertEqual(sum(body.elementAt(i).isCurveTo()
-                             for i in range(body.elementCount())), 48)
-
-        def point(index):
-            element = body.elementAt(index)
-            return QPointF(element.x, element.y)
-
-        for i in range(24):
-            valley = point(3 + i * 6)
-            incoming = valley - point(2 + i * 6)
-            outgoing = point(4 + i * 6) - valley
-            self.assertLess((incoming - outgoing).manhattanLength(), 1e-8)
-            tip = point(6 + i * 6)
-            incoming = tip - point(5 + i * 6)
-            outgoing = point(7 + i * 6 if i < 23 else 1) - tip
-            dot = incoming.x() * outgoing.x() + incoming.y() * outgoing.y()
-            magnitude = math.hypot(incoming.x(), incoming.y()) * math.hypot(outgoing.x(), outgoing.y())
-            self.assertLess(dot / magnitude, 0.95)
-
-    def test_curved_shouting_preserves_the_inner_text_ellipse(self):
-        rect = QRectF(0, 0, 400, 100)
-        for shape in SHOUTING_SHAPES:
-            for nodes in (8, 16, 64):
-                for seed in range(10):
-                    body = body_path(rect, "Shouting", irregularity=100, seed=seed,
-                                     shouting_shape=shape, nodes=nodes)
-                    for degrees in range(0, 360, 5):
-                        angle = math.radians(degrees)
-                        point = rect.center() + QPointF(
-                            rect.width() * 0.495 * math.cos(angle),
-                            rect.height() * 0.495 * math.sin(angle))
-                        self.assertTrue(body.contains(point))
-
-    def test_thought_cloud_irregularity_is_seeded_and_adjustable(self):
-        rect = QRectF(0, 0, 240, 100)
-        regular = body_path(rect, "Thought", irregularity=0, seed=17)
-        self.assertEqual(regular, body_path(rect, "Thought", irregularity=0, seed=99))
-        irregular = body_path(rect, "Thought", irregularity=100, seed=17)
-        self.assertEqual(irregular, body_path(rect, "Thought", irregularity=100, seed=17))
-        self.assertNotEqual(irregular, regular)
-        self.assertNotEqual(irregular, body_path(rect, "Thought", irregularity=100, seed=99))
-        self.assertEqual(len(irregular.toSubpathPolygons()), 1)
-        self.assertTrue(irregular.contains(rect.center()))
-
-    def test_thought_trail_irregularity_is_stable_and_keeps_body_intact(self):
-        rect = QRectF(0, 0, 240, 100)
-        body = body_path(rect, "Thought", irregularity=100, seed=17)
-        tip = tail_tip(body, rect.center(), 0.7, 100)
-        regular = bubble_path(body, rect.center(), tip, "Thought", 14, 150, 0, 17)
-        self.assertEqual(regular, bubble_path(body, rect.center(), tip, "Thought", 14, 150, 0, 99))
-        irregular = bubble_path(body, rect.center(), tip, "Thought", 14, 150, 100, 17)
-        self.assertNotEqual(irregular, regular)
-        self.assertEqual(irregular, bubble_path(body, rect.center(), tip, "Thought", 14, 150, 100, 17))
-        self.assertNotEqual(irregular, bubble_path(body, rect.center(), tip, "Thought", 14, 150, 100, 99))
-        self.assertEqual(body.subtracted(irregular).elementCount(), 0)
-
-    def test_sharp_angle_tails_are_connected_on_elongated_bubbles(self):
-        for width, height in ((800, 40), (40, 800), (1000, 10), (10, 1000)):
-            rect = QRectF(0, 0, width, height)
-            for style in ("Oval", "Rounded", "Square", "Shouting"):
-                body = body_path(rect, style, 42, 100, 19)
-                for length in (1, 10, 100):
-                    for degrees in range(0, 360, 5):
-                        with self.subTest(width=width, height=height, style=style,
-                                          length=length, degrees=degrees):
-                            tip = tail_tip(body, rect.center(), math.radians(degrees), length)
-                            path = bubble_path(body, rect.center(), tip, style, 14)
-                            self.assertEqual(len(path.toSubpathPolygons()), 1)
-
-
-class ContextTests(unittest.TestCase):
-    def test_canvas_transform_includes_dpi_rotation_and_scale(self):
-        document = FakeDocument(None)
-        baseline = QTransform().translate(-15, 7)
-        delta = QTransform().translate(90, 40).rotate(30).scale(2, 0.6)
-        shape = FakeShape(FakeLayer(), baseline * delta)
-        transform = canvas_transform(document, baseline, shape)
-        local = QPointF(40, 30)
-        points = delta.map(local * (72 / 300))
-        expected = points * (300 / 72)
-        self.assertLess((transform.map(local) - expected).manhattanLength(), 1e-6)
-
-    def test_context_render_and_mouse_mapping_share_transformed_coordinates(self):
-        preview = BubblePreview()
-        preview.resize(600, 400)
-        image = QImage(800, 600, QImage.Format_ARGB32)
-        image.fill(QColor("white"))
-        transform = QTransform().translate(250, 200).rotate(37).scale(1.7, 0.8)
-        landmark = QPointF(40, 40)
-        painter = QPainter(image)
-        painter.setBrush(QColor("magenta"))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(transform.map(landmark), 8, 8)
-        painter.end()
-        preview.setContext(image, QRectF(0, 0, 800, 600), transform)
-        preview.setBubble(
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -100 200 200">'
-            '<rect x="0" y="0" width="10" height="10" fill="blue"/></svg>',
-            QRectF(-100, -100, 200, 200), None)
-        widget_point = preview.toWidget(landmark, preview.view_box)
-        mapped = preview.toBubble(widget_point, preview.view_box)
-        self.assertLess((mapped - landmark).manhattanLength(), 1e-6)
-        rendered = preview.grab().toImage()
-        self.assertEqual(rendered.pixelColor(round(widget_point.x()), round(widget_point.y())),
-                         QColor("magenta"))
-        bubble_point = preview.toWidget(QPointF(5, 5), preview.view_box)
-        self.assertEqual(rendered.pixelColor(round(bubble_point.x()), round(bubble_point.y())),
-                         QColor("blue"))
-        preview.close()
-
-    def snapshotDocuments(self):
-        source = MagicMock()
-        layer, parent, root = MagicMock(), MagicMock(), MagicMock()
-        layer.parentNode.return_value = parent
-        parent.parentNode.return_value = root
-        root.parentNode.return_value = None
-        parent.childNodes.return_value = [MagicMock(), layer]
-        root.childNodes.return_value = [parent]
-        clone = source.clone.return_value
-        clone_parent, clone_layer = MagicMock(), MagicMock()
-        clone.rootNode.return_value.childNodes.return_value = [clone_parent]
-        clone_parent.childNodes.return_value = [MagicMock(), clone_layer]
-        source.width.return_value, source.height.return_value = 4000, 2000
-        image = QImage(2048, 1024, QImage.Format_ARGB32)
-        clone.thumbnail.return_value = image
-        return source, layer, clone, clone_layer
-
-    def test_snapshot_excludes_only_cloned_bubble_and_limits_image_size(self):
-        document, layer, clone, cloned_layer = self.snapshotDocuments()
-        image, rect = canvas_snapshot(document, layer)
-        self.assertEqual(rect, QRectF(0, 0, 4000, 2000))
-        clone.thumbnail.assert_called_once_with(2048, 1024)
-        cloned_layer.setVisible.assert_called_once_with(False)
-        layer.setVisible.assert_not_called()
-        clone.close.assert_called_once()
-
-    def test_snapshot_is_closed_even_when_rendering_fails(self):
-        document, layer, clone, cloned_layer = self.snapshotDocuments()
-        clone.thumbnail.return_value = QImage()
-        with self.assertRaises(ValueError):
-            canvas_snapshot(document, layer)
-        clone.close.assert_called_once()
-
-    def test_shared_layer_snapshot_hides_only_the_edited_bubble(self):
-        document, layer, clone, cloned_layer = self.snapshotDocuments()
-        edited, other = MagicMock(), MagicMock()
-        edited.name.return_value = SHAPE_NAME + "-first"
-        other.name.return_value = SHAPE_NAME + "-second"
-        cloned_layer.shapes.return_value = [edited, other]
-        canvas_snapshot(document, layer, edited.name())
-        edited.setVisible.assert_called_once_with(False)
-        edited.update.assert_called_once()
-        other.setVisible.assert_not_called()
-        cloned_layer.setVisible.assert_not_called()
-        layer.setVisible.assert_not_called()
-        clone.close.assert_called_once()
+STYLES = tuple(BUBBLE_TYPES)
+SHOUTING_SHAPES = tuple(SHOUTING_ALGORITHMS)
 
 
 class EditorTests(unittest.TestCase):
@@ -640,12 +37,12 @@ class EditorTests(unittest.TestCase):
         image = QImage(32, 24, QImage.Format_ARGB32)
         image.fill(QColor("white"))
         self.snapshotPatch = patch(
-            "krita_speech_bubble_generator.krita_speech_bubble_generator.canvas_snapshot",
+            "krita_speech_bubble_generator.krita_host.gateway.canvas_snapshot",
             return_value=(image, QRectF(0, 0, 800, 600)))
         self.snapshot = self.snapshotPatch.start()
-        self.docker = SpeechBubbleDocker()
+        self.docker = EditorHarness(SpeechBubbleDocker())
         self.docker.selectionTimer.stop()
-        self.warnings = patch.object(self.docker, "warn")
+        self.warnings = patch.object(self.docker.view, "warn")
         self.warn = self.warnings.start()
 
     def tearDown(self):
@@ -1290,6 +687,36 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.docker.editLayerId, second.uniqueId())
         self.warn.assert_not_called()
 
+    def test_document_switch_discards_pending_text_without_mutating_either_document(self):
+        first_document, first_layer, first_group = self.editTarget()
+        original = self.savedText(first_document, first_layer)
+        self.docker.bubbleText.setPlainText("Do not flush after leaving the document")
+        second_document = FakeDocument(None)
+        FakeKrita.document = second_document
+        self.docker.applyLiveUpdate()
+        self.assertEqual(self.savedText(first_document, first_layer), original)
+        self.assertEqual(first_layer.items, [first_group])
+        self.assertEqual(second_document.layers, {})
+        self.assertIsNone(self.docker.editLayerId)
+        self.assertFalse(self.docker.pendingLiveUpdate)
+        self.assertFalse(self.docker.liveTimer.isActive())
+        FakeKrita.document = first_document
+        self.docker.syncSelection()
+        self.assertEqual(self.docker.bubbleText.toPlainText(), original)
+        self.warn.assert_not_called()
+
+    def test_hiding_dock_flushes_pending_snapshot_and_stops_owned_timers(self):
+        document, layer, group = self.editTarget()
+        self.docker.show()
+        self.docker.bubbleText.setPlainText("Persist before hiding")
+        self.docker.hide()
+        self.assertEqual(self.savedText(document, layer), "Persist before hiding")
+        self.assertFalse(self.docker.pendingLiveUpdate)
+        self.assertFalse(self.docker.liveTimer.isActive())
+        self.assertFalse(self.docker.selectionTimer.isActive())
+        self.assertFalse(self.docker.backgroundTimer.isActive())
+        self.warn.assert_not_called()
+
     def test_deselection_finishes_pending_edit_then_stops_live_writes(self):
         document, layer, group = self.editTarget()
         group.select()
@@ -1544,7 +971,7 @@ class EditorTests(unittest.TestCase):
 
     def test_shared_bubble_settings_reopen_in_a_fresh_editor(self):
         document, layer, first, second = self.sharedBubbles()
-        editor = SpeechBubbleDocker()
+        editor = EditorHarness(SpeechBubbleDocker())
         try:
             editor.loadSelectedBubble()
             self.assertEqual(editor.editShapeName, second.name())
@@ -1578,6 +1005,19 @@ class EditorTests(unittest.TestCase):
         self.docker.syncSelection()
         self.assertIsNone(self.docker.editShapeName)
         self.assertEqual(self.docker.addOnPage.text(), "Add on Page")
+        self.warn.assert_not_called()
+
+    def test_selecting_a_duplicate_named_bubble_stops_editing_without_a_dialog(self):
+        document, layer, original = self.editTarget()
+        duplicate = FakeShape(layer, original.transformation())
+        duplicate.setName(original.name())
+        layer.items.append(duplicate)
+        self.docker.startNewBubble()
+        duplicate.select()
+        self.docker.syncSelection()
+        self.assertIsNone(self.docker.editShapeName)
+        self.assertEqual(self.docker.addOnPage.text(), "Add on Page")
+        self.assertEqual(layer.items, [original, duplicate])
         self.warn.assert_not_called()
 
     def test_existing_layer_import_failure_preserves_original_bubbles(self):
@@ -1615,7 +1055,7 @@ class EditorTests(unittest.TestCase):
         document, layer, group = self.editTarget()
         self.docker.startNewBubble()
         self.docker.addDestination.setCurrentIndex(1)
-        with patch.object(self.docker, "bubbleGroup", return_value=None):
+        with patch.object(self.docker.gateway, "bubble_group", return_value=None):
             self.docker.addOnPageShape()
         self.assertEqual(layer.items, [group])
         self.assertFalse(getattr(layer, "removed", False))
@@ -1671,7 +1111,7 @@ class EditorTests(unittest.TestCase):
     def test_canvas_background_is_on_by_default_and_can_be_refreshed(self):
         image = QImage(800, 600, QImage.Format_ARGB32)
         image.fill(QColor("white"))
-        with patch("krita_speech_bubble_generator.krita_speech_bubble_generator.canvas_snapshot",
+        with patch("krita_speech_bubble_generator.krita_host.gateway.canvas_snapshot",
                    return_value=(image, QRectF(0, 0, 800, 600))) as snapshot:
             document, layer, group = self.editTarget()
             self.assertTrue(self.docker.canvasBackground.isChecked())
@@ -1687,7 +1127,7 @@ class EditorTests(unittest.TestCase):
 
     def test_failed_canvas_background_is_reported_and_disabled(self):
         self.editTarget()
-        with patch("krita_speech_bubble_generator.krita_speech_bubble_generator.canvas_snapshot",
+        with patch("krita_speech_bubble_generator.krita_host.gateway.canvas_snapshot",
                    side_effect=ValueError("Snapshot failed")):
             self.docker.refreshBackground.click()
         self.assertFalse(self.docker.canvasBackground.isChecked())
