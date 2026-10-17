@@ -1,0 +1,38 @@
+name: Build release ZIP
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build Krita plugin ZIP
+        run: python3 scripts/build_zip.py
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: krita_speech_bubble_generator-${{ github.ref_name }}
+          path: dist/krita_speech_bubble_generator.zip
+          if-no-files-found: error
+
+      - name: Attach ZIP to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/krita_speech_bubble_generator.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true

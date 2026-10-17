@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title description">
+  <title id="title">Krita Speech Bubble Generator styles</title>
+  <desc id="description">An illustration of an oval speech bubble with a curved tail, a cloud-shaped thought bubble with a trail of blobs, and an irregular shouting burst with curved valleys.</desc>
+  <rect width="1200" height="480" rx="24" fill="#f5f3ee"/>
+  <g fill="#252b39" font-family="DejaVu Sans, sans-serif">
+    <text x="48" y="65" font-size="32" font-weight="bold">A bubble for every line.</text>
+    <text x="48" y="100" font-size="18" fill="#596171">Speech, thoughts and a little more volume.</text>
+  </g>
+  <g fill="#ffffff" stroke="#303548" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M360 250 C360 275 338 300 305 313 Q323 343 350 365 Q304 349 276 324 C259 328 240 330 220 330 C143 330 80 294 80 250 C80 206 143 170 220 170 C297 170 360 206 360 250 Z"/>
+    <path d="M470 205 C461 181 481 164 502 173 C516 147 547 148 558 167 C580 144 615 151 621 171 C645 153 675 166 674 187 C708 182 725 208 709 229 C735 250 721 275 699 277 C709 303 680 322 657 308 C646 333 612 332 599 315 C575 338 543 327 540 308 C512 324 484 311 484 290 C458 294 441 269 456 251 C431 231 447 207 470 205 Z"/>
+    <ellipse cx="705" cy="330" rx="14" ry="12" transform="rotate(20 705 330)"/>
+    <ellipse cx="732" cy="355" rx="10" ry="8" transform="rotate(-20 732 355)"/>
+    <circle cx="750" cy="377" r="5"/>
+    <path fill="#fff3da" d="M838 245 Q911 245 851 223 Q918 239 872 198 Q927 223 907 172 Q946 216 946 155 Q972 214 985 169 Q1001 215 1023 169 Q1036 213 1118 142 Q1044 227 1146 198 Q1058 237 1158 239 Q1067 250 1138 268 Q1058 261 1150 301 Q1048 279 1104 331 Q1031 295 1046 344 Q1009 296 1006 364 Q986 300 964 344 Q969 297 929 337 Q948 284 883 316 Q930 273 842 288 Q922 258 838 245 Z"/>
+  </g>
+  <g fill="#252b39" font-family="Segoe Print, DejaVu Sans, sans-serif" text-anchor="middle" font-style="italic">
+    <text x="220" y="249" font-size="23">Hello there!</text>
+    <text x="220" y="280" font-size="19">Let's tell a story.</text>
+    <text x="584" y="234" font-size="22">What if...</text>
+    <text x="584" y="265" font-size="19">I had an idea?</text>
+    <text x="995" y="250" font-size="24" font-weight="bold">LOOK OUT!</text>
+  </g>
+  <g fill="#596171" font-family="DejaVu Sans, sans-serif" font-size="17" font-weight="bold" text-anchor="middle">
+    <text x="220" y="437">SPEECH</text>
+    <text x="595" y="437">THOUGHT</text>
+    <text x="995" y="437">SHOUTING</text>
+  </g>
+</svg>
