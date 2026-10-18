@@ -26,6 +26,7 @@ class BubbleEditorView(QScrollArea):
     page_requested = pyqtSignal(bool)
     new_requested = pyqtSignal()
     import_requested = pyqtSignal()
+    recovery_requested = pyqtSignal()
     background_toggled = pyqtSignal(bool)
     refresh_requested = pyqtSignal()
     destination_changed = pyqtSignal(bool)
@@ -286,6 +287,17 @@ class BubbleEditorView(QScrollArea):
             "Select its vector layer, then click Import old bubble. "
             "If you are editing another bubble, click New bubble first.")
         self.importInstructions.setWordWrap(True)
+        self.recoverBubble = QPushButton("Recover selected bubble")
+        self.recoveryInstructions = QLabel(
+            "Moving bubbles and merging vector layers now keep bubbles editable automatically. "
+            "Older merged bubbles reconnect when selected if their saved settings match uniquely. "
+            "To retry explicitly, select one generated bubble and click Recover selected bubble. "
+            "Older recovery uses settings from removed layers in this document. Ambiguous or "
+            "missing settings are refused. Artwork stays unchanged until the first edit, "
+            "which may change an older bubble's layout. Save a copy first, then save as .kra.")
+        self.recoveryInstructions.setWordWrap(True)
+        import_options.addWidget(self.recoveryInstructions)
+        import_options.addWidget(self.recoverBubble)
         import_options.addWidget(self.importInstructions)
         self.importLimitations = QLabel(
             "The layer must contain exactly one ungrouped bubble outline and its text, "
@@ -338,6 +350,7 @@ class BubbleEditorView(QScrollArea):
             lambda: self.page_requested.emit(self.addDestination.currentIndex() == 0))
         self.newBubbleButton.clicked.connect(self.new_requested.emit)
         self.importOldBubble.clicked.connect(self.import_requested.emit)
+        self.recoverBubble.clicked.connect(self.recovery_requested.emit)
         self.canvasBackground.toggled.connect(self.background_toggled.emit)
         self.refreshBackground.clicked.connect(self.refresh_requested.emit)
         self.addDestination.currentIndexChanged.connect(self._destination_changed)

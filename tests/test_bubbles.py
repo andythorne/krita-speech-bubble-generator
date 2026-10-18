@@ -579,6 +579,7 @@ class EditorTests(unittest.TestCase):
         self.docker.view.ovalVerticalPaddingSpinBox.setValue(150)
         self.docker.view.ovalSquarenessSpinBox.setValue(0)
         self.docker.loadSelectedBubble()
+        key = self.docker.annotationKey(layer)
         self.assertTrue(self.docker.view.ovalGroup.isChecked())
         self.assertEqual(self.docker.view.ovalVerticalPaddingSlider.value(), 10)
         self.assertEqual(self.docker.view.ovalSquarenessSlider.value(), 70)
@@ -810,7 +811,7 @@ class EditorTests(unittest.TestCase):
         self.docker.loadSelectedBubble()
         return document, first, second
 
-    def savedText(self, document, layer, shape_name=SHAPE_NAME):
+    def savedText(self, document, layer, shape_name=None):
         return json.loads(bytes(document.annotation(self.docker.annotationKey(layer, shape_name))))["text"]
 
     def test_canvas_selection_switches_editor_text_without_manual_edit_button(self):
@@ -1381,7 +1382,7 @@ class EditorTests(unittest.TestCase):
         document.setActiveNode(second)
         self.docker.syncSelection()
         QTest.qWait(320)
-        self.snapshot.assert_called_once_with(document, second, SHAPE_NAME)
+        self.snapshot.assert_called_once_with(document, second, second.items[0].name())
         self.assertFalse(self.docker.backgroundTimer.isActive())
         self.assertEqual(self.docker.editLayerId, second.uniqueId())
         self.warn.assert_not_called()
@@ -1407,7 +1408,7 @@ class EditorTests(unittest.TestCase):
         second.items[0].select()
         document.setActiveNode(second)
         self.docker.refreshMovedBackground()
-        self.snapshot.assert_called_once_with(document, second, SHAPE_NAME)
+        self.snapshot.assert_called_once_with(document, second, second.items[0].name())
         self.assertEqual(self.docker.editLayerId, second.uniqueId())
         self.warn.assert_not_called()
 

@@ -14,6 +14,9 @@ from ..bubbles.settings import (
 from .canvas_context import canvas_snapshot, canvas_transform
 from .contracts import Document, Host, Node, Shape
 from .legacy import read_legacy_bubble
+from .recovery import (
+    detached_group, generated_name, has_detached_records, matching_records, stable_name,
+)
 from ..editor.contracts import BubbleRendering, GatewayError, TargetMissing
 from ..editor.state import BubbleTarget, CanvasContext, LoadedBubble, Selection
 
@@ -54,11 +57,14 @@ class KritaGateway:
         return tuple(sorted(shape.name() for shape in shapes if cls.shape_selected(shape)))
 
     def bubble_shapes(self, document: Document, layer: Node) -> List[Shape]:
+        detached = has_detached_records(document)
         return [
             shape for shape in layer.shapes()
             if shape.type() == "groupshape"
-            and (shape.name() == SHAPE_NAME or shape.name().startswith(SHAPE_NAME + "-"))
-            and document.annotation(self.annotation_key(layer, shape.name()))
+            and generated_name(shape.name())
+            and (document.annotation(self.annotation_key(layer, shape.name()))
+                 or (stable_name(shape.name()) and document.annotation(shape.name()))
+                 or detached)
         ]
 
     @staticmethod
@@ -105,7 +111,20 @@ class KritaGateway:
         shape = self.resolve_bubble(document, layer, shape_name)
         if shape is None:
             raise GatewayError("Select one generated bubble on this vector layer to edit it.")
-        record = decode_record(bytes(document.annotation(self.annotation_key(layer, shape.name()))))
+        data = document.annotation(self.annotation_key(layer, shape.name()))
+        if not data:
+            return self._restore_shape(document, layer, shape)
+        record = decode_record(bytes(data))
+        independent = document.annotation(shape.name()) if stable_name(shape.name()) else QByteArray()
+        if independent:
+            saved = decode_record(bytes(independent))
+            if saved.layer_id and saved.layer_id != layer.uniqueId().toString():
+                return self._restore_shape(document, layer, shape)
+        if not layer.locked():
+            name = shape.name() if stable_name(shape.name()) else SHAPE_NAME + "-" + uuid.uuid4().hex
+            if name != shape.name() or independent != data:
+                self.save_settings(document, layer, record.settings, record.baseline, name)
+                shape.setName(name)
         return LoadedBubble(
             BubbleTarget(document, layer.uniqueId(), shape.name(), record.baseline),
             record.settings, layer.name())
@@ -140,8 +159,63 @@ class KritaGateway:
                       settings: BubbleSettings,
                       baseline: Union[TransformValues, QTransform],
                       name: str = SHAPE_NAME) -> None:
+        data = QByteArray(encode_record(
+            settings, baseline, layer.uniqueId().toString() if stable_name(name) else ""))
         document.setAnnotation(self.annotation_key(layer, name), "Speech bubble settings",
-                               QByteArray(encode_record(settings, baseline)))
+                               data)
+        if stable_name(name):
+            document.setAnnotation(name, "Speech bubble settings", data)
+
+    def recover_selected(self) -> LoadedBubble:
+        document = self.active_document()
+        layer = document.activeNode() if document is not None else None
+        if document is None or layer is None or layer.type() != "vectorlayer":
+            raise GatewayError("Select one generated bubble on a vector layer to recover it.")
+        if layer.locked():
+            raise GatewayError("Unlock the bubble layer before recovering it.")
+        selected = [shape for shape in layer.shapes() if self.shape_selected(shape)]
+        if (len(selected) != 1 or selected[0].type() != "groupshape"
+                or not generated_name(selected[0].name())):
+            raise GatewayError("Select exactly one intact generated bubble group to recover it.")
+        shape = selected[0]
+        if document.annotation(self.annotation_key(layer, shape.name())):
+            raise GatewayError("This bubble is already editable. Select it to edit.")
+        return self._restore_shape(document, layer, shape)
+
+    def _restore_shape(self, document: Document, layer: Node, shape: Shape) -> LoadedBubble:
+        if layer.locked():
+            raise GatewayError("Unlock the bubble layer before restoring its editing settings.")
+        data = document.annotation(shape.name()) if stable_name(shape.name()) else QByteArray()
+        recovered = detached_group(layer.toSvg(), shape.name(), require_text=not bool(data))
+        records = ([decode_record(bytes(data))] if data
+                   else matching_records(document, shape.name(), recovered.text))
+        if len(records) != 1:
+            raise GatewayError(
+                "Recovery requires one uniquely matching saved settings record from a removed "
+                "layer. No unique match was found; the artwork has not been changed.")
+        if self.renderer is None:
+            raise GatewayError("The bubble recovery renderer is not configured.")
+        if document.xRes() <= 0 or document.yRes() <= 0:
+            raise GatewayError("The document resolution is invalid.")
+        settings = records[0].settings
+        # Reparenting can bake the old group transform into its children. Fit
+        # the regenerated outline in local coordinates, retaining the new parent.
+        placement = recovered.placement(self.renderer.render(settings).svg)
+        delta = (QTransform.fromScale(document.xRes() / 72, document.xRes() / 72)
+                 * placement * shape.transformation())
+        inverse, invertible = delta.inverted()
+        if not invertible:
+            raise GatewayError("The recovered bubble placement is not invertible.")
+        baseline = shape.transformation() * inverse
+        name = shape.name()
+        if (not stable_name(name)
+                or sum(item.name() == name for item in layer.shapes()) != 1):
+            name = SHAPE_NAME + "-" + uuid.uuid4().hex
+        self.save_settings(document, layer, settings, baseline, name)
+        shape.setName(name)
+        return LoadedBubble(
+            BubbleTarget(document, layer.uniqueId(), name, transform_values(baseline)),
+            settings, layer.name())
 
     def import_legacy(self) -> LoadedBubble:
         document = self.active_document()
@@ -191,19 +265,20 @@ class KritaGateway:
         inverse, invertible = delta.inverted()
         if not invertible:
             raise GatewayError("The old bubble placement is not invertible.")
-        group = self.bubble_group(layer, shapes)
+        name = SHAPE_NAME + "-" + uuid.uuid4().hex
+        group = self.bubble_group(layer, shapes, name)
         if group is None:
             raise GatewayError("Krita could not group the old bubble shapes.")
         # A synthetic import baseline lets the first redraw retain the old body's
         # canvas placement even though its original shapes used unrelated origins.
         baseline = group.transformation() * inverse
-        self.save_settings(document, layer, settings, baseline)
+        self.save_settings(document, layer, settings, baseline, name)
         for shape in shapes:
             self.deselect_shape(shape)
         group.select()
         self.refresh_canvas(document)
         return LoadedBubble(
-            BubbleTarget(document, layer.uniqueId(), SHAPE_NAME, transform_values(baseline)),
+            BubbleTarget(document, layer.uniqueId(), name, transform_values(baseline)),
             settings, layer.name())
 
     def create(self, settings: BubbleSettings, svg: str,
@@ -225,9 +300,7 @@ class KritaGateway:
             if layer.locked():
                 raise GatewayError("Unlock the selected vector layer before adding a bubble.")
         previous = layer.shapes()
-        used = (any(shape.name() == SHAPE_NAME for shape in previous)
-                or bool(document.annotation(self.annotation_key(layer))))
-        name = SHAPE_NAME + "-" + uuid.uuid4().hex if used else SHAPE_NAME
+        name = SHAPE_NAME + "-" + uuid.uuid4().hex
         shapes = layer.addShapesFromSvg(svg)
         if not shapes:
             if new_layer:
@@ -282,7 +355,32 @@ class KritaGateway:
 
     def update(self, target: BubbleTarget, settings: BubbleSettings,
                svg: str) -> BubbleTarget:
-        document, layer, old = self._target_shape(target)
+        try:
+            document, layer, old = self._target_shape(target)
+        except TargetMissing:
+            document = self.active_document()
+            if document is None or not stable_name(target.shape_name):
+                raise
+            original_layer = document.nodeByUniqueID(cast(QUuid, target.layer_id))
+            if (original_layer is not None and original_layer.type() == "vectorlayer"
+                    and any(shape.name() == target.shape_name for shape in original_layer.shapes())):
+                raise
+            matches: List[Tuple[Node, Shape]] = []
+
+            def find(node: Node) -> None:
+                if node.type() == "vectorlayer":
+                    matches.extend((node, shape) for shape in node.shapes()
+                                   if shape.name() == target.shape_name
+                                   and shape.type() == "groupshape")
+                for child in node.childNodes():
+                    find(child)
+
+            for child in document.rootNode().childNodes():
+                find(child)
+            if len(matches) != 1:
+                raise
+            layer, old = matches[0]
+            target = self._restore_shape(document, layer, old).target
         if layer.locked():
             raise GatewayError("Unlock the bubble layer before updating it.")
         selected = self.shape_selected(old)

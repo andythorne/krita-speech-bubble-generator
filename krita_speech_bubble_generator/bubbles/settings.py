@@ -90,6 +90,7 @@ class BubbleSettings:
 class SavedBubble:
     settings: BubbleSettings
     baseline: TransformValues
+    layer_id: str = ""
 
 
 # Fresh editor defaults and old records deliberately have different semantics.
@@ -268,7 +269,10 @@ def validate_settings(data: object) -> Dict[str, object]:
     values = _settings_mapping(data)
     settings = settings_from_dict(values, legacy=True)
     baseline = _baseline_values(values.get("baseline"))
-    return {**settings.to_dict(), "baseline": list(baseline)}
+    normalized: Dict[str, object] = {**settings.to_dict(), "baseline": list(baseline)}
+    if "layer_id" in values:
+        normalized["layer_id"] = _string(values["layer_id"], "bubble layer identity")
+    return normalized
 
 
 def decode_record(data: bytes) -> SavedBubble:
@@ -279,11 +283,14 @@ def decode_record(data: bytes) -> SavedBubble:
     normalized = validate_settings(values)
     return SavedBubble(
         settings_from_dict(normalized, legacy=True),
-        _baseline_values(normalized["baseline"]))
+        _baseline_values(normalized["baseline"]),
+        _string(normalized.get("layer_id", ""), "bubble layer identity"))
 
 
 def encode_record(settings: BubbleSettings,
-                  baseline: Union[TransformValues, QTransform]) -> bytes:
+                  baseline: Union[TransformValues, QTransform],
+                  layer_id: str = "") -> bytes:
     values = validate_settings({**settings.to_dict(),
-                                "baseline": _baseline_values(baseline)})
+                                "baseline": _baseline_values(baseline),
+                                **({"layer_id": layer_id} if layer_id else {})})
     return json.dumps(values, allow_nan=False).encode("utf-8")

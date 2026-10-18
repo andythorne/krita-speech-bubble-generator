@@ -55,6 +55,7 @@ class EditorPresenter(QObject):
         view.page_requested.connect(request_page)
         view.new_requested.connect(self.start_new)
         view.import_requested.connect(self.import_legacy)
+        view.recovery_requested.connect(self.recover_selected)
         view.background_toggled.connect(self.toggle_background)
         view.refresh_requested.connect(self.refresh_background)
         view.destination_changed.connect(self.set_destination)
@@ -191,22 +192,29 @@ class EditorPresenter(QObject):
         self.state.observed = selection
         self.view.show_mode(False, "New bubble")
 
+    def recover_selected(self) -> None:
+        self._recover(self.gateway.recover_selected, "Recovered: ",
+                      " - save as .kra to keep the restored editing settings.")
+
     def import_legacy(self) -> None:
+        self._recover(
+            self.gateway.import_legacy, "Imported: ",
+            " - first update redraws the bubble; layout and per-word formatting may change.")
+
+    def _recover(self, recover: Callable[[], LoadedBubble], prefix: str, suffix: str) -> None:
         if self.state.loading or self.state.writing:
             return
         self.flush_live_update()
         self.state.writing = True
         try:
-            loaded = self.gateway.import_legacy()
+            loaded = recover()
         except (GatewayError, SettingsError) as error:
             self.view.warn(str(error))
             return
         finally:
             self.state.writing = False
         self.bind(loaded)
-        self.view.show_mode(
-            True, "Imported: " + loaded.layer_name
-            + " - first update redraws the bubble; layout and per-word formatting may change.")
+        self.view.show_mode(True, prefix + loaded.layer_name + suffix)
 
     def stop_editing(self) -> None:
         self._cancel_live()

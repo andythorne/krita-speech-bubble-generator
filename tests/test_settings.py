@@ -95,6 +95,24 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(fresh.shout_irregularity, 50)
         self.assertEqual(fresh.thought_irregularity, 50)
 
+    def test_optional_layer_identity_round_trips_without_changing_editable_settings(self):
+        settings = BubbleSettings()
+        layer_id = "{7c808a68-555b-4f38-b84d-075b92a8913a}"
+        encoded = encode_record(settings, QTransform(), layer_id)
+        record = decode_record(encoded)
+        self.assertEqual(record.settings, settings)
+        self.assertEqual(record.layer_id, layer_id)
+        self.assertEqual(json.loads(encoded)["version"], 1)
+        self.assertNotIn("layer_id", record.settings.to_dict())
+        self.assertEqual(decode_record(encode_record(settings, QTransform())).layer_id, "")
+        self.assertNotIn("layer_id", json.loads(encode_record(settings, QTransform())))
+
+    def test_invalid_saved_layer_identities_are_rejected(self):
+        for value in (None, True, 17, [], {}):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(SettingsError, "layer identity"):
+                    decode_record(json.dumps(self.record(layer_id=value)).encode())
+
     def test_legacy_punchy_node_default_is_not_fresh_node_default(self):
         values = self.record(shout_shape="Punchy")
         del values["shout_nodes"]

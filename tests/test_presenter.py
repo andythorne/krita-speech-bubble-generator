@@ -25,6 +25,7 @@ class SubstituteView(QObject):
     page_requested = pyqtSignal(bool)
     new_requested = pyqtSignal()
     import_requested = pyqtSignal()
+    recovery_requested = pyqtSignal()
     background_toggled = pyqtSignal(bool)
     refresh_requested = pyqtSignal()
     destination_changed = pyqtSignal(bool)
@@ -141,6 +142,13 @@ class SubstituteGateway:
         if self.load_error:
             raise self.load_error
         loaded = self.record("imported", BubbleSettings(text="Old dialogue"))
+        self.select(loaded)
+        return loaded
+
+    def recover_selected(self):
+        if self.load_error:
+            raise self.load_error
+        loaded = self.record("recovered", BubbleSettings(text="Recovered dialogue"))
         self.select(loaded)
         return loaded
 
@@ -280,6 +288,36 @@ class PresenterTests(unittest.TestCase):
         self.assertEqual(self.view.warnings[-1], "Unsupported old artwork")
         self.assertEqual(self.presenter.state.target, loaded.target)
         self.assertFalse(self.presenter.state.writing)
+
+    def test_explicit_recovery_binds_without_scheduling_a_redraw(self):
+        self.view.recovery_requested.emit()
+        self.assertEqual(self.presenter.state.target.shape_name, "recovered")
+        self.assertEqual(self.view.settings.text, "Recovered dialogue")
+        self.assertEqual(self.presenter.state.applied, self.view.settings)
+        self.assertIsNone(self.presenter.state.pending)
+        self.assertFalse(self.presenter.live_timer.isActive())
+        self.assertEqual(self.gateway.writes, [])
+        self.assertIn("Recovered:", self.view.mode[1])
+        self.edit(text="Edited recovered dialogue")
+        self.presenter.flush_live_update()
+        self.assertEqual(self.gateway.writes[0][0].shape_name, "recovered")
+
+    def test_failed_recovery_reports_the_error_without_rebinding(self):
+        loaded = self.bind()
+        self.gateway.load_error = GatewayError("No unique match")
+        self.view.recovery_requested.emit()
+        self.assertEqual(self.view.warnings[-1], "No unique match")
+        self.assertEqual(self.presenter.state.target, loaded.target)
+        self.assertFalse(self.presenter.state.writing)
+
+    def test_recovery_flushes_pending_edits_to_their_original_target(self):
+        original = self.bind()
+        self.edit(text="Pending original dialogue")
+        self.view.recovery_requested.emit()
+        self.assertEqual(self.gateway.writes[0][0], original.target)
+        self.assertEqual(self.gateway.writes[0][1].text, "Pending original dialogue")
+        self.assertEqual(self.presenter.state.target.shape_name, "recovered")
+        self.assertIsNone(self.presenter.state.pending)
 
     def test_only_irregularity_intents_regenerate_the_corresponding_seed(self):
         self.edit(text="Typing", tail_angle=0.9, shout_nodes=32, shout_shape="Angular",

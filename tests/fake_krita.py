@@ -124,6 +124,9 @@ class FakeLayer:
     def type(self):
         return "vectorlayer"
 
+    def childNodes(self):
+        return []
+
     def locked(self):
         return self.is_locked
 
@@ -173,6 +176,9 @@ class FakeDocument:
     def rootNode(self):
         return self
 
+    def childNodes(self):
+        return list(self.layers.values())
+
     def createVectorLayer(self, name):
         self.layer = FakeLayer()
         self.layer.events = self.events
@@ -187,6 +193,9 @@ class FakeDocument:
 
     def annotation(self, key):
         return self.annotations.get(key, QByteArray())
+
+    def annotationTypes(self):
+        return list(self.annotations)
 
     def setAnnotation(self, key, description, value):
         self.annotations[key] = value

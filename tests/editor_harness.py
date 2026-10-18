@@ -54,8 +54,6 @@ class EditorHarness:
                          "editShapeName": "shape_name"}
         if name in target_fields:
             return getattr(state.target, target_fields[name]) if state.target else None
-        if name == "annotationKey":
-            return self.gateway.annotation_key
         if name == "shapeByName":
             return self.gateway.shape_by_name
         if name == "validateSettings":
@@ -78,6 +76,12 @@ class EditorHarness:
 
     def widget(self):
         return self.view
+
+    def annotationKey(self, layer, shape_name=None):
+        if shape_name is None:
+            names = self.gateway.bubble_shapes(self.gateway.active_document(), layer)
+            shape_name = names[0].name() if len(names) == 1 else SHAPE_NAME
+        return self.gateway.annotation_key(layer, shape_name)
 
     def geometry(self):
         return self.renderer.geometry(self.presenter.state.draft)

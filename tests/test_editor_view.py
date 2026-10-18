@@ -67,7 +67,8 @@ class EditorViewTests(unittest.TestCase):
                 self.view.tailCurveDirection)),
             (self.view.importTab, (
                 self.view.importInstructions, self.view.importLimitations,
-                self.view.importOldBubble)),
+                self.view.importOldBubble, self.view.recoverBubble,
+                self.view.recoveryInstructions)),
         ):
             for control in controls:
                 with self.subTest(page=page, control=control):
@@ -106,6 +107,17 @@ class EditorViewTests(unittest.TestCase):
             current = self.view.bubbleText.textCursor()
             self.assertEqual((current.position(), current.anchor()),
                              (cursor.position(), cursor.anchor()))
+
+    def test_recovery_action_emits_only_a_recovery_request(self):
+        requests = QSignalSpy(self.view.recovery_requested)
+        imports = QSignalSpy(self.view.import_requested)
+        edits = QSignalSpy(self.view.edited)
+        self.view.recoverBubble.click()
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(imports), 0)
+        self.assertEqual(len(edits), 0)
+        self.assertIn("removed layers", self.view.recoveryInstructions.text())
+        self.assertIn("Ambiguous", self.view.recoveryInstructions.text())
 
     def test_numeric_controls_share_settings_ranges_and_fresh_defaults(self):
         defaults = BubbleSettings()

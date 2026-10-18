@@ -16,15 +16,16 @@ dialogue, choose a style, and drag the tail into place.
 | Expressive shapes | Adjust thought-cloud irregularity, thought-trail blob size, and shouting-spike spacing with subtle height and valley-depth variation. Your pattern stays stable while you edit. |
 | Text and appearance | Choose fonts, text size, fill and outline colours, with the original plugin's automatic wrapping and tight line spacing. Bubble sizing uses the actual rendered text size, including accents, descenders and overhanging letters. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
 | Optical text centering | Optionally balance the visual weight of the lettering vertically, so blocks with longer upper lines do not look top-heavy. |
-| Organised controls | Use the Text, Bubble and Tail tabs to find related options, or Import for old bubbles and its limitations. The preview and page actions are shared across all tabs. |
+| Organised controls | Use the Text, Bubble and Tail tabs to find related options, or Import to recover moved bubbles or import old ones. The preview and page actions are shared across all tabs. |
 | Bubble padding | Adjust the space around the text, with horizontal padding changing twice as strongly as vertical padding. At 0%, only the clearance needed for the outline and shape remains, without a built-in text-size margin. |
 | Customisable ovals | Enable independent horizontal/vertical padding for flatter ovals around wide text, and adjust Squareness from an ellipse to a softly squared outline. Leave customisation off for the original fuller proportions. |
 | Remembered options | Dialogue, font, colours, padding, layout, tail and style-specific options, canvas-background preference and layer destination are remembered between sessions. Each new bubble still defaults to Oval. |
 | Live editing | Select a saved bubble to edit its text and appearance directly from the docker. Changes appear on the canvas after a short pause. |
 | Canvas-aware preview | See the surrounding artwork while editing, so you can point the tail at the right character. |
-| Flexible layers | Create a new vector layer or keep several independently editable bubbles on one layer. |
+| Flexible layers | Create a new vector layer or keep several independently editable bubbles on one layer. Move bubbles or merge vector layers without losing their editing settings. |
 | Editable later | Save as `.kra` and return to your bubbles later, keeping their canvas position, rotation and scale when updating. |
 | Import old bubbles | Recover editable text and appearance from a single original Rogudator bubble on its own vector layer. |
+| Automatic reconnection | Older merged bubbles reconnect to uniquely matching saved settings when selected. |
 
 ## Installation
 
@@ -164,6 +165,26 @@ It follows the bubble when you move, rotate or scale it on the canvas. Use
 Save your document in **Krita's `.kra` format** to keep bubble editing settings.
 Keep the generated bubble group intact: updating rebuilds its contents, so
 manual edits to individual vector shapes inside the group are not retained.
+
+### Move bubbles and merge vector layers
+
+Bubbles remain editable when moved between vector layers or after a native
+vector-layer merge within the same document. Select a bubble normally to keep
+editing; there is no recovery step after each merge. This also works for bubbles
+with identical lettering or no lettering. Save as `.kra` to keep the settings.
+
+Existing bubbles are upgraded automatically when loaded into the docker.
+For older documents whose layers were already merged, selecting a bubble
+automatically reconnects uniquely matching settings from the removed layers.
+Missing settings, ambiguous matches, empty older lettering and altered group
+structures are refused rather than guessed. Copying artwork into another
+document does not transfer its editing settings.
+
+The **Import** tab also has **Recover selected bubble** for explicitly retrying
+reconnection. Other bubbles and artwork on the layer are left alone.
+Reconnection itself does not redraw or reposition artwork. Save a copy before
+editing older merged bubbles: their first edit fits the regenerated outline to
+the previous placement, but may change shape, text layout or tail appearance.
 
 ### Import a bubble from the original Rogudator plugin
 

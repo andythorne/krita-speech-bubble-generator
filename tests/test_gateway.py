@@ -63,7 +63,7 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(loaded.settings.autocenter)
         self.assertTrue(group.isSelected())
         self.assertEqual(self.gateway.load_selected(), loaded)
-        self.assertEqual(self.gateway.observe().bubble_names, (SHAPE_NAME,))
+        self.assertEqual(self.gateway.observe().bubble_names, (loaded.target.shape_name,))
 
     def test_imported_bubble_first_update_retains_old_body_canvas_placement(self):
         layer = self.legacy_layer()
@@ -202,10 +202,11 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(layer.shapes(), originals)
         self.assertEqual(self.document.annotations, {})
         loaded = self.gateway.import_legacy()
-        record = bytes(self.document.annotation(self.gateway.annotation_key(layer)))
+        key = self.gateway.annotation_key(layer, loaded.target.shape_name)
+        record = bytes(self.document.annotation(key))
         with self.assertRaisesRegex(GatewayError, "already"):
             self.gateway.import_legacy()
-        self.assertEqual(bytes(self.document.annotation(self.gateway.annotation_key(layer))), record)
+        self.assertEqual(bytes(self.document.annotation(key)), record)
         self.assertEqual(self.gateway.load_selected(), loaded)
 
     def test_import_group_failure_does_not_discard_original_artwork(self):
@@ -221,15 +222,18 @@ class GatewayTests(unittest.TestCase):
         loaded = self.create()
         layer = self.document.activeNode()
         shape = layer.items[0]
-        self.assertEqual(loaded.target.shape_name, SHAPE_NAME)
-        record = decode_record(bytes(self.document.annotation(self.gateway.annotation_key(layer))))
+        self.assertRegex(loaded.target.shape_name, r"^rsbg-bubble-[0-9a-f]{32}$")
+        key = self.gateway.annotation_key(layer, loaded.target.shape_name)
+        record = decode_record(bytes(self.document.annotation(key)))
+        self.assertEqual(bytes(self.document.annotation(loaded.target.shape_name)),
+                         bytes(self.document.annotation(key)))
         self.assertEqual(record.settings, self.settings)
         self.assertEqual(record.baseline, loaded.target.baseline)
         self.assertTrue(shape.isSelected())
         self.assertGreaterEqual(shape.boundingBox().left(), self.settings.font_size)
         self.assertGreaterEqual(shape.boundingBox().top(), self.settings.font_size)
         self.assertEqual(self.document.events[-2:], ["wait", "projection"])
-        self.assertEqual(self.gateway.observe().selected_names, (SHAPE_NAME,))
+        self.assertEqual(self.gateway.observe().selected_names, (loaded.target.shape_name,))
 
     def test_shared_layer_uses_unique_names_and_annotation_keys(self):
         first = self.create()
@@ -262,7 +266,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(second_layer.items, [second_shape])
         self.assertEqual(updated.identity, first.target.identity)
         self.assertEqual(decode_record(bytes(self.document.annotation(
-            self.gateway.annotation_key(first_layer)))).settings.text, "Edited")
+            self.gateway.annotation_key(first_layer, first.target.shape_name)))).settings.text, "Edited")
         self.assertEqual(self.gateway.load_selected().target, second.target)
 
     def test_repeated_updates_preserve_transform_selection_stacking_and_siblings(self):
@@ -301,6 +305,7 @@ class GatewayTests(unittest.TestCase):
                 self.update(loaded.target)
             layer.is_locked = False
             duplicate = FakeShape(layer, QTransform())
+            duplicate.setName(original.name())
             layer.items.append(duplicate)
             with self.assertRaises(TargetMissing):
                 self.update(loaded.target)
@@ -318,19 +323,21 @@ class GatewayTests(unittest.TestCase):
         loaded = self.create()
         layer = self.document.activeNode()
         old = layer.items[0]
-        record = bytes(self.document.annotation(self.gateway.annotation_key(layer)))
+        key = self.gateway.annotation_key(layer, loaded.target.shape_name)
+        record = bytes(self.document.annotation(key))
         layer.fail_import = True
         with self.assertRaisesRegex(GatewayError, "import the updated"):
             self.update(loaded.target)
         self.assertEqual(layer.items, [old])
-        self.assertEqual(bytes(self.document.annotation(self.gateway.annotation_key(layer))), record)
+        self.assertEqual(bytes(self.document.annotation(key)), record)
         self.assertEqual(self.gateway.load_selected().target, loaded.target)
 
     def test_group_failure_cleans_only_imported_shapes_for_add_and_update(self):
         loaded = self.create()
         layer = self.document.activeNode()
         old = layer.items[0]
-        record = bytes(self.document.annotation(self.gateway.annotation_key(layer)))
+        key = self.gateway.annotation_key(layer, loaded.target.shape_name)
+        record = bytes(self.document.annotation(key))
         with patch.object(self.gateway, "bubble_group", return_value=None):
             with self.assertRaisesRegex(GatewayError, "group"):
                 self.create(new_layer=False)
@@ -339,18 +346,19 @@ class GatewayTests(unittest.TestCase):
                 self.update(loaded.target)
             self.assertEqual(layer.items, [old])
         self.assertFalse(getattr(layer, "removed", False))
-        self.assertEqual(bytes(self.document.annotation(self.gateway.annotation_key(layer))), record)
+        self.assertEqual(bytes(self.document.annotation(key)), record)
 
     def test_failed_original_removal_cleans_replacement_and_does_not_save_new_record(self):
         loaded = self.create()
         layer = self.document.activeNode()
         old = layer.items[0]
-        record = bytes(self.document.annotation(self.gateway.annotation_key(layer)))
+        key = self.gateway.annotation_key(layer, loaded.target.shape_name)
+        record = bytes(self.document.annotation(key))
         with patch.object(old, "remove", return_value=False):
             with self.assertRaisesRegex(GatewayError, "replace the original"):
                 self.update(loaded.target)
         self.assertEqual(layer.items, [old])
-        self.assertEqual(bytes(self.document.annotation(self.gateway.annotation_key(layer))), record)
+        self.assertEqual(bytes(self.document.annotation(key)), record)
 
     def test_failed_cleanup_is_reported_instead_of_silently_treating_import_as_removed(self):
         loaded = self.create()
@@ -367,10 +375,10 @@ class GatewayTests(unittest.TestCase):
                 self.update(loaded.target)
         self.assertIn(old, layer.items)
         self.assertEqual(decode_record(bytes(self.document.annotation(
-            self.gateway.annotation_key(layer)))).settings, loaded.settings)
+            self.gateway.annotation_key(layer, loaded.target.shape_name)))).settings, loaded.settings)
 
     def test_recursive_selection_and_deselection_include_selected_children(self):
-        self.create()
+        loaded = self.create()
         layer = self.document.activeNode()
         group = layer.items[0]
         group.deselect()
@@ -378,7 +386,7 @@ class GatewayTests(unittest.TestCase):
         child.setName("inner-path")
         child.select()
         with patch.object(group, "children", return_value=[child]):
-            self.assertEqual(self.gateway.selected_names(layer.shapes()), (SHAPE_NAME,))
+            self.assertEqual(self.gateway.selected_names(layer.shapes()), (loaded.target.shape_name,))
             self.assertIs(self.gateway.resolve_bubble(self.document, layer), group)
             observed = self.gateway.deselect()
             self.assertEqual(observed.selected_names, ())
@@ -419,7 +427,7 @@ class GatewayTests(unittest.TestCase):
         with patch("krita_speech_bubble_generator.krita_host.gateway.canvas_snapshot",
                    return_value=(image, rect)) as snapshot:
             context = self.gateway.snapshot(loaded.target)
-            snapshot.assert_called_once_with(self.document, layer, SHAPE_NAME)
+            snapshot.assert_called_once_with(self.document, layer, loaded.target.shape_name)
         self.assertIs(context.image, image)
         self.assertEqual(context.rect, rect)
         self.assertEqual(context.transform, self.gateway.placement(loaded.target))

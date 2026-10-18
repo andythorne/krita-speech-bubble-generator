@@ -50,6 +50,7 @@ existing root bootstrap and public docker module remain the entry points.
 | `bubbles/geometry.py` | Shared path, tail, and SVG mathematics. |
 | `krita_host/gateway.py` | Native document reads/writes, selection resolution, annotations, and placement. |
 | `krita_host/legacy.py` | Conservative, opt-in recovery of one original-plugin outline and its text from SVG. |
+| `krita_host/recovery.py` | Stable group-ID recognition, conservative old-record matching, and placement reconstruction after reparenting. |
 | `krita_host/canvas_context.py` | Canvas transforms and temporary background snapshots. |
 | `editor/preview.py` | Preview drawing, coordinate mapping, and tail-handle input. |
 | `editor/tail_compass.py`, `editor/text_resize_handle.py`, `editor/wheel_guard.py` | Local tail presets, text-resize and scroll interactions. |
@@ -105,6 +106,19 @@ Keep `rsbg-bubble`, `rsbg-bubble-<id>`, the `rsbg-bubble-` annotation prefix, an
 version-1 record format compatible. Fresh editor defaults and defaults for missing
 legacy fields are deliberately different; do not merge them. Normalize old
 records before loading controls, without mutating the caller's data.
+
+New and imported groups use `rsbg-bubble-<uuid>` identities. Save the version-1
+record under the group name as a layer-independent document annotation, as well
+as the legacy layer-scoped annotation key. Never match current bubbles by their
+lettering: duplicate and empty text must survive repeated merges. Load old
+layer-scoped records and upgrade their group identity without redrawing.
+The optional version-1 `layer_id` field identifies the layer whose coordinate
+system the saved baseline belongs to, not the bubble's identity. It prevents
+stale layer-scoped records from winning when a bubble moves back to an old layer.
+When native merging bakes group transforms into children, reconstruct placement
+from the saved group's SVG outline before updating it. Older already-merged
+groups may reconnect by uniquely matching orphaned records; ambiguous cases must
+be refused. Selection observation is read-only; migration happens when loading.
 
 Pending edits belong to an explicit document/layer/group target. Reconcile
 selection before a delayed write, preserve eligible edits to the previous target,
@@ -205,6 +219,14 @@ that the first edit keeps its placement, and that saving and reopening retains
 editability. Verify that unrelated artwork and multi-bubble layers are refused.
 Try the tail compass with locked, unlocked and zero-length tails, then drag to
 an angle between presets.
+
+For merged bubbles, include identical dialogue and empty lettering. Merge
+several generated vector layers, save and reopen, then select and edit each
+bubble without using the Import tab. Repeat merges and try merging immediately
+after typing a pending edit. Check that selection alone leaves artwork untouched,
+the first edit retains placement and sibling artwork, and reopening keeps
+editing enabled. Try older already-merged bubbles too: unique saved settings
+should reconnect automatically, while ambiguous or missing settings are refused.
 
 Add regression coverage for changed behaviour where practical. Update user
 documentation when controls or workflows change, and describe your changes and
