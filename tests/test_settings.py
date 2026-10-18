@@ -14,6 +14,31 @@ from krita_speech_bubble_generator.bubbles.settings import (
 
 
 class SettingsTests(unittest.TestCase):
+    def test_style_transfer_copies_text_appearance_bubble_options_and_tail_curvature(self):
+        source = BubbleSettings(
+            style="Shouting", text="Source", font="Serif", font_size=28,
+            text_color="#112233", text_styles=(TextStyle(0, 3, True),),
+            fill="#123456", stroke="#654321", outline=7, padding=65,
+            oval_custom=True, oval_vertical_padding=35, oval_squareness=80,
+            autocenter=False, optical_center=True, line_length=32,
+            tail_length=150, tail_angle=-2.1, lock_tail=False,
+            tail_curve=73, tail_curve_direction="Down", thought_size=275,
+            shout_shape="Expressive", shout_nodes=37, shout_irregularity=85,
+            thought_nodes=29, thought_irregularity=75,
+            shout_seed=1729, thought_seed=2718)
+        target = replace(BubbleSettings(), shout_seed=123, thought_seed=456,
+                         text_styles=(TextStyle(0, 5, False, True),))
+        style_fields = (
+            "style", "fill", "stroke", "outline", "padding", "oval_custom",
+            "oval_vertical_padding", "oval_squareness", "shout_shape", "shout_nodes",
+            "shout_irregularity", "thought_nodes", "thought_irregularity",
+            "tail_curve", "tail_curve_direction", "font", "font_size",
+            "text_color", "autocenter", "optical_center", "line_length")
+        expected = replace(target, **{name: getattr(source, name) for name in style_fields})
+        self.assertEqual(target.with_style_from(source), expected)
+        self.assertEqual(target.shout_seed, 123)
+        self.assertEqual(source.text, "Source")
+
     def test_defaults_use_oval_without_overriding_saved_styles(self):
         self.assertEqual(BubbleSettings().style, "Oval")
         self.assertEqual(settings_from_dict({}).style, "Oval")

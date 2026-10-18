@@ -28,6 +28,8 @@ class BubbleEditorView(QScrollArea):
     new_requested = pyqtSignal()
     import_requested = pyqtSignal()
     recovery_requested = pyqtSignal()
+    copy_style_requested = pyqtSignal()
+    paste_style_requested = pyqtSignal()
     background_toggled = pyqtSignal(bool)
     refresh_requested = pyqtSignal()
     destination_changed = pyqtSignal(bool)
@@ -243,6 +245,21 @@ class BubbleEditorView(QScrollArea):
         self.thoughtGroup.setVisible(False)
         bubble_options.addWidget(self.thoughtGroup)
 
+        style_actions = QHBoxLayout()
+        self.copyStyle = QPushButton("Copy Style")
+        self.copyStyle.setToolTip(
+            "Copy font, text size and colour, wrapping and centering, "
+            "all Bubble-tab options, and the tail curve amount and direction.")
+        self.pasteStyle = QPushButton("Paste Style")
+        self.pasteStyle.setEnabled(False)
+        self.pasteStyle.setToolTip(
+            "Apply the copied style without replacing dialogue or per-word bold/italic. "
+            "Tail position, length and lock are not copied. "
+            "The style stays available to paste onto more bubbles.")
+        style_actions.addWidget(self.copyStyle)
+        style_actions.addWidget(self.pasteStyle)
+        bubble_options.addLayout(style_actions)
+
         tail_group = QGroupBox("Tail")
         tail_layout = QVBoxLayout()
         tail_columns = QHBoxLayout()
@@ -367,6 +384,8 @@ class BubbleEditorView(QScrollArea):
         self.newBubbleButton.clicked.connect(self.new_requested.emit)
         self.importOldBubble.clicked.connect(self.import_requested.emit)
         self.recoverBubble.clicked.connect(self.recovery_requested.emit)
+        self.copyStyle.clicked.connect(self.copy_style_requested.emit)
+        self.pasteStyle.clicked.connect(self.paste_style_requested.emit)
         self.canvasBackground.toggled.connect(self.background_toggled.emit)
         self.refreshBackground.clicked.connect(self.refresh_requested.emit)
         self.addDestination.currentIndexChanged.connect(self._destination_changed)
@@ -603,6 +622,9 @@ class BubbleEditorView(QScrollArea):
         blocker = QSignalBlocker(self.addDestination)
         self.addDestination.setCurrentIndex(0 if new_layer else 1)
         del blocker
+
+    def set_style_available(self, available: bool) -> None:
+        self.pasteStyle.setEnabled(available)
 
     def warn(self, message: str) -> None:
         QMessageBox.warning(self, "Speech bubble generator", message)

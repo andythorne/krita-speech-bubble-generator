@@ -38,6 +38,65 @@ SHOUTING_SHAPES = tuple(SHOUTING_ALGORITHMS)
 
 
 class EditorTests(unittest.TestCase):
+    def test_style_buttons_apply_repeatedly_to_selected_bubbles_and_saved_settings(self):
+        self.docker.bubbleType.setCurrentText("Shouting")
+        self.docker.paddingSpinBox.setValue(65)
+        self.docker.shoutingShape.setCurrentText("Expressive")
+        self.docker.shoutingSpinBox.setValue(85)
+        self.docker.tailCurveSpinBox.setValue(73)
+        self.docker.tailCurveDirection.setCurrentText("Down")
+        self.docker.presenter.edit(replace(
+            self.docker.presenter.state.draft, font_size=28, text_color="#112233",
+            autocenter=False, optical_center=True, line_length=32))
+        source = self.docker.presenter.state.draft
+        self.docker.copyStyle.click()
+        self.assertTrue(self.docker.pasteStyle.isEnabled())
+        for index, style in enumerate(("Oval", "Thought")):
+            with self.subTest(style=style):
+                self.docker.presenter.start_new()
+                self.docker.bubbleType.setCurrentText(style)
+                self.docker.bubbleText.setPlainText("Target " + str(index))
+                self.docker.speechFont.setCurrentIndex(
+                    (self.docker.speechFont.currentIndex() + 1)
+                    % self.docker.speechFont.count())
+                self.docker.presenter.edit(replace(
+                    self.docker.presenter.state.draft, font_size=14,
+                    text_color="#654321", autocenter=True, optical_center=False,
+                    line_length=20, text_styles=(TextStyle(0, 6, True),)))
+                self.docker.tailSpinBox.setValue(70)
+                self.docker.tailCurveSpinBox.setValue(0)
+                self.docker.paddingSpinBox.setValue(200)
+                document, layer, group = self.editTarget()
+                target = self.docker.presenter.state.draft
+                expected = target.with_style_from(source)
+                self.docker.pasteStyle.click()
+                self.assertEqual(self.docker.view.initial_settings(), expected)
+                self.assertEqual(expected.font, source.font)
+                self.assertEqual(expected.font_size, 28)
+                self.assertEqual(expected.text_color, "#112233")
+                self.assertFalse(expected.autocenter)
+                self.assertTrue(expected.optical_center)
+                self.assertEqual(expected.line_length, 32)
+                self.assertEqual(expected.text, "Target " + str(index))
+                self.assertEqual(expected.text_styles, target.text_styles)
+                self.assertTrue(self.docker.pendingLiveUpdate)
+                self.assertTrue(self.docker.flushLiveUpdate())
+                self.assertEqual(self.docker.gateway.load_selected().settings, expected)
+                self.assertEqual(self.docker.presenter.state.copied_style, source)
+                self.assertTrue(self.docker.pasteStyle.isEnabled())
+
+    def test_pasting_smaller_text_size_respects_existing_tail_length_limit(self):
+        self.docker.speechFontSize.setValue(10)
+        self.docker.copyStyle.click()
+        self.docker.speechFontSize.setValue(28)
+        self.docker.tailSpinBox.setValue(250)
+        self.docker.pasteStyle.click()
+        pasted = self.docker.presenter.state.draft
+        self.assertEqual(pasted.font_size, 10)
+        self.assertEqual(pasted.tail_length, 100)
+        self.assertEqual(self.docker.tailSpinBox.maximum(), 100)
+        self.assertEqual(self.docker.view.initial_settings(), pasted)
+
     def test_word_emphasis_live_updates_and_reloads_with_document_and_preferences(self):
         document, layer, group = self.editTarget()
         self.docker.bubbleText.setPlainText("Normal bold italic")

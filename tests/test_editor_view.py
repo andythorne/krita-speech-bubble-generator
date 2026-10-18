@@ -152,7 +152,8 @@ class EditorViewTests(unittest.TestCase):
                 self.view.paddingSpinBox, self.view.shoutingGroup,
                 self.view.thoughtGroup, self.view.ovalGroup,
                 self.view.ovalVerticalPaddingSlider, self.view.ovalVerticalPaddingSpinBox,
-                self.view.ovalSquarenessSlider, self.view.ovalSquarenessSpinBox)),
+                self.view.ovalSquarenessSlider, self.view.ovalSquarenessSpinBox,
+                self.view.copyStyle, self.view.pasteStyle)),
             (self.view.tailTab, (
                 self.view.tailCompass, self.view.lockTailLength,
                 self.view.tailSlider, self.view.tailSpinBox, self.view.thoughtSizeGroup,
@@ -211,6 +212,25 @@ class EditorViewTests(unittest.TestCase):
         self.assertEqual(len(edits), 0)
         self.assertIn("removed layers", self.view.recoveryInstructions.text())
         self.assertIn("Ambiguous", self.view.recoveryInstructions.text())
+
+    def test_style_buttons_are_last_in_bubble_tab_and_emit_only_requests(self):
+        layout = self.view.bubbleTab.layout()
+        actions = layout.itemAt(layout.count() - 1).layout()
+        self.assertIs(actions.itemAt(0).widget(), self.view.copyStyle)
+        self.assertIs(actions.itemAt(1).widget(), self.view.pasteStyle)
+        copies = QSignalSpy(self.view.copy_style_requested)
+        pastes = QSignalSpy(self.view.paste_style_requested)
+        edits = QSignalSpy(self.view.edited)
+        self.view.pasteStyle.click()
+        self.assertEqual(len(pastes), 0)
+        self.view.copyStyle.click()
+        self.assertEqual(len(copies), 1)
+        self.view.set_style_available(True)
+        for _ in range(2):
+            self.view.pasteStyle.click()
+        self.assertEqual(len(pastes), 2)
+        self.assertTrue(self.view.pasteStyle.isEnabled())
+        self.assertEqual(len(edits), 0)
 
     def test_numeric_controls_share_settings_ranges_and_fresh_defaults(self):
         defaults = BubbleSettings()

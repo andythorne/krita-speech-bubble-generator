@@ -44,6 +44,7 @@ class EditorPresenter(QObject):
         if saved is not None:
             self.state.background_enabled = saved.background_enabled
         view.set_new_layer(self._new_layer)
+        view.set_style_available(False)
         view.show_background(self.state.background_enabled, False)
         self.live_timer = self._timer(150, self.apply_live_update, single=True)
         self.selection_timer = self._timer(150, self.sync_selection)
@@ -56,6 +57,8 @@ class EditorPresenter(QObject):
         view.new_requested.connect(self.start_new)
         view.import_requested.connect(self.import_legacy)
         view.recovery_requested.connect(self.recover_selected)
+        view.copy_style_requested.connect(self.copy_style)
+        view.paste_style_requested.connect(self.paste_style)
         view.background_toggled.connect(self.toggle_background)
         view.refresh_requested.connect(self.refresh_background)
         view.destination_changed.connect(self.set_destination)
@@ -109,6 +112,16 @@ class EditorPresenter(QObject):
 
     def move_tail(self, point: QPointF) -> None:
         self.edit(self.renderer.move_tail(self.state.draft, point))
+
+    def copy_style(self) -> None:
+        self.state.copied_style = self.state.draft
+        self.view.set_style_available(True)
+
+    def paste_style(self) -> None:
+        if self.state.copied_style is None:
+            self.view.warn("Copy a bubble style before pasting it.")
+            return
+        self.edit(self.state.draft.with_style_from(self.state.copied_style))
 
     def _cancel_live(self) -> None:
         self.live_timer.stop()

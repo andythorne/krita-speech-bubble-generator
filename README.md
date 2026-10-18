@@ -17,6 +17,7 @@ dialogue, choose a style, and drag the tail into place.
 | Text and appearance | Choose fonts, text size, fill and outline colours. Make selected words bold, italic, or both, with automatic wrapping and tight line spacing. Bubble sizing includes the formatted lettering, accents, descenders and overhanging letters. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
 | Optical text centering | Optionally balance the visual weight of the lettering vertically, so blocks with longer upper lines do not look top-heavy. |
 | Organised controls | Use the Text, Bubble and Tail tabs to find related options, or Import to recover moved bubbles or import old ones. The preview and page actions are shared across all tabs. |
+| Copy and paste styles | Reuse font, text size and colour, wrapping and centering, all Bubble-tab options and tail curve settings across multiple bubbles without replacing their dialogue. |
 | Bubble padding | Adjust the space around the text, with horizontal padding changing twice as strongly as vertical padding. At 0%, only the clearance needed for the outline and shape remains, without a built-in text-size margin. |
 | Customisable ovals | Enable independent horizontal/vertical padding for flatter ovals around wide text, and adjust Squareness from an ellipse to a softly squared outline. Leave customisation off for the original fuller proportions. |
 | Remembered options | Dialogue, font, colours, padding, layout, tail and style-specific options, canvas-background preference and layer destination are remembered between sessions. Each new bubble still defaults to Oval. |
@@ -152,6 +153,20 @@ number of spikes or cloud lobes. Higher counts give a denser outline; lower
 counts give fewer, broader features. Shouting and Thought keep separate counts,
 and changing the count leaves text layout, padding and the locked tail length
 unchanged.
+
+To reuse an appearance, click **Copy Style** at the bottom of the **Bubble**
+tab. Select another bubble, then click **Paste Style**. This applies the font,
+text size and colour, automatic centering, characters-per-line and optical
+vertical centering settings, all options from the Bubble tab (including options
+for other bubble types), and the Tail tab's **Curve** amount and **Direction**.
+Kerning follows the font and size; there is no separate kerning control.
+Dialogue and per-word bold/italic formatting stay unchanged. Tail position,
+length, length lock and thought-trail blob size are not copied, and each bubble
+keeps its own random pattern seeds. Reducing text size can shorten a tail to fit
+the length control's existing text-size-based limit.
+The copied style remains available for repeated pasting across bubbles and
+documents until you copy another style or restart the docker. You can also
+paste it while creating a new bubble. Existing bubbles update automatically.
 
 ## Edit an existing bubble
 

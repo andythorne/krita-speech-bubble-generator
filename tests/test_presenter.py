@@ -26,6 +26,8 @@ class SubstituteView(QObject):
     new_requested = pyqtSignal()
     import_requested = pyqtSignal()
     recovery_requested = pyqtSignal()
+    copy_style_requested = pyqtSignal()
+    paste_style_requested = pyqtSignal()
     background_toggled = pyqtSignal(bool)
     refresh_requested = pyqtSignal()
     destination_changed = pyqtSignal(bool)
@@ -40,6 +42,7 @@ class SubstituteView(QObject):
         self.background = True, False
         self.rendered = None
         self.new_layer = True
+        self.style_available = False
 
     def initial_settings(self):
         return self.settings
@@ -72,6 +75,9 @@ class SubstituteView(QObject):
 
     def set_new_layer(self, new_layer):
         self.new_layer = new_layer
+
+    def set_style_available(self, available):
+        self.style_available = available
 
 
 class SubstituteRenderer:
@@ -199,6 +205,52 @@ class PresenterTests(unittest.TestCase):
 
     def edit(self, **values):
         self.view.edited.emit(replace(self.presenter.state.draft, **values), tuple(values))
+
+    def test_style_clipboard_survives_repeated_pastes_selection_and_new_bubbles(self):
+        self.assertFalse(self.view.style_available)
+        self.bind("source", style="Shouting", fill="#123456", outline=7,
+                  padding=95, shout_shape="Expressive", shout_nodes=37,
+                  shout_irregularity=90, thought_irregularity=80,
+                  tail_curve=75, tail_curve_direction="Down")
+        source = self.presenter.state.draft
+        self.view.copy_style_requested.emit()
+        self.assertTrue(self.view.style_available)
+        self.assertIsNone(self.presenter.state.pending)
+        self.assertEqual(self.gateway.writes, [])
+        self.edit(padding=200)
+        for name in ("second", "third"):
+            with self.subTest(name=name):
+                self.bind(name, style="Thought", tail_length=70, tail_angle=-1.2,
+                          lock_tail=False, shout_seed=173, thought_seed=291)
+                target = self.presenter.state.target
+                expected = self.presenter.state.draft.with_style_from(source)
+                self.view.paste_style_requested.emit()
+                self.assertEqual(self.presenter.state.draft, expected)
+                self.assertEqual(self.view.settings, expected)
+                self.assertEqual(self.presenter.state.pending.target, target)
+                self.assertTrue(self.presenter.apply_live_update())
+                self.assertEqual(self.gateway.writes[-1][:2], (target, expected))
+                self.assertEqual(self.presenter.state.copied_style, source)
+                self.assertTrue(self.view.style_available)
+        self.presenter.start_new()
+        self.view.paste_style_requested.emit()
+        self.assertEqual(self.presenter.state.draft.style, source.style)
+        self.assertEqual(self.presenter.state.draft.padding, source.padding)
+        self.assertIsNone(self.presenter.state.pending)
+        self.assertEqual(self.seeds.call_count, 2)
+
+    def test_copying_again_replaces_style_and_paste_without_copy_warns(self):
+        initial = self.presenter.state.draft
+        self.view.paste_style_requested.emit()
+        self.assertEqual(self.presenter.state.draft, initial)
+        self.assertEqual(self.view.warnings, ["Copy a bubble style before pasting it."])
+        self.view.copy_style_requested.emit()
+        self.edit(style="Square", padding=25)
+        self.view.copy_style_requested.emit()
+        self.edit(style="Thought", padding=300)
+        self.view.paste_style_requested.emit()
+        self.assertEqual(self.presenter.state.draft.style, "Square")
+        self.assertEqual(self.presenter.state.draft.padding, 25)
 
     def test_initial_seeds_are_injected_and_all_timers_have_gui_ownership(self):
         self.assertIs(self.presenter.parent(), self.owner)

@@ -59,6 +59,7 @@ class CanvasContext:
 @dataclass
 class EditorSession:
     draft: BubbleSettings
+    copied_style: Optional[BubbleSettings] = None
     target: Optional[BubbleTarget] = None
     applied: Optional[BubbleSettings] = None
     observed: Optional[Selection] = None

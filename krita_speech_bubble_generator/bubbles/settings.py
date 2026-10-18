@@ -1,6 +1,6 @@
 """Editable values and the version-1 saved-bubble format."""
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import json
 import math
 from typing import Dict, List, Mapping, Sequence, Tuple, Union, cast
@@ -62,6 +62,23 @@ class BubbleSettings:
     thought_nodes: int = 16
     thought_seed: int = 0
     text_styles: Tuple[TextStyle, ...] = ()
+
+    def with_style_from(self, source: "BubbleSettings") -> "BubbleSettings":
+        """Apply text appearance, Bubble-tab options and tail curvature, not dialogue."""
+        return replace(
+            self, style=source.style, fill=source.fill, stroke=source.stroke,
+            font=source.font, font_size=source.font_size, text_color=source.text_color,
+            autocenter=source.autocenter, optical_center=source.optical_center,
+            line_length=source.line_length,
+            outline=source.outline, padding=source.padding,
+            oval_custom=source.oval_custom,
+            oval_vertical_padding=source.oval_vertical_padding,
+            oval_squareness=source.oval_squareness,
+            shout_shape=source.shout_shape, shout_nodes=source.shout_nodes,
+            shout_irregularity=source.shout_irregularity,
+            thought_nodes=source.thought_nodes,
+            thought_irregularity=source.thought_irregularity,
+            tail_curve=source.tail_curve, tail_curve_direction=source.tail_curve_direction)
 
     def to_dict(self) -> Dict[str, SettingValue]:
         return {
