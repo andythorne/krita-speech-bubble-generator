@@ -13,7 +13,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import QByteArray, QPoint, QPointF, QRectF, QSettings, Qt
-from PyQt5.QtGui import QColor, QFontDatabase, QImage, QTransform, QWheelEvent
+from PyQt5.QtGui import QColor, QFontDatabase, QImage, QTextCursor, QTransform, QWheelEvent
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QCheckBox, QPushButton
 
@@ -27,7 +27,7 @@ from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTIN
 from krita_speech_bubble_generator.krita_speech_bubble_generator import (
     SpeechBubbleDocker,
 )
-from krita_speech_bubble_generator.bubbles.settings import SHAPE_NAME
+from krita_speech_bubble_generator.bubbles.settings import SHAPE_NAME, TextStyle
 from krita_speech_bubble_generator.editor.preferences import QtPreferencesStore
 from editor_harness import EditorHarness
 from krita_speech_bubble_generator.krita_host.canvas_context import canvas_transform
@@ -38,6 +38,37 @@ SHOUTING_SHAPES = tuple(SHOUTING_ALGORITHMS)
 
 
 class EditorTests(unittest.TestCase):
+    def test_word_emphasis_live_updates_and_reloads_with_document_and_preferences(self):
+        document, layer, group = self.editTarget()
+        self.docker.bubbleText.setPlainText("Normal bold italic")
+        cursor = self.docker.bubbleText.textCursor()
+        cursor.setPosition(7)
+        cursor.setPosition(11, QTextCursor.KeepAnchor)
+        self.docker.bubbleText.setTextCursor(cursor)
+        self.docker.view.boldText.click()
+        cursor.setPosition(12)
+        cursor.setPosition(18, QTextCursor.KeepAnchor)
+        self.docker.bubbleText.setTextCursor(cursor)
+        self.docker.view.italicText.click()
+        expected = (TextStyle(7, 11, True), TextStyle(12, 18, False, True))
+        self.assertEqual(self.docker.presenter.state.draft.text_styles, expected)
+        self.assertTrue(self.docker.pendingLiveUpdate)
+        with patch.object(layer, "addShapesFromSvg", wraps=layer.addShapesFromSvg) as imported:
+            self.assertTrue(self.docker.flushLiveUpdate())
+        svg = imported.call_args[0][0]
+        self.assertIn('font-weight="bold"', svg)
+        self.assertIn('font-style="italic"', svg)
+        saved = self.docker.gateway.load_selected()
+        self.assertEqual(saved.settings.text_styles, expected)
+        self.docker.view.load_settings(saved.settings)
+        self.assertEqual(self.docker.view.initial_settings().text_styles, expected)
+        reopened = SpeechBubbleDocker()
+        try:
+            self.assertEqual(reopened.view.initial_settings().text_styles, expected)
+        finally:
+            reopened.close()
+            reopened.deleteLater()
+
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)

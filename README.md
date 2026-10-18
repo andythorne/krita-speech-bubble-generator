@@ -14,7 +14,7 @@ dialogue, choose a style, and drag the tail into place.
 | Adjustable nodes | Set 8-64 nodes for more or fewer shouting spikes or thought-cloud lobes. Each bubble keeps its node counts. |
 | Tail positioning and curves | Choose one of eight compass directions or drag freely in the preview, without snapping to corners or spikes. Keep a straight tail or adjust its curve amount and Up/Down direction, with an optional length lock. Thought trails can curve too. |
 | Expressive shapes | Adjust thought-cloud irregularity, thought-trail blob size, and shouting-spike spacing with subtle height and valley-depth variation. Your pattern stays stable while you edit. |
-| Text and appearance | Choose fonts, text size, fill and outline colours, with the original plugin's automatic wrapping and tight line spacing. Bubble sizing uses the actual rendered text size, including accents, descenders and overhanging letters. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
+| Text and appearance | Choose fonts, text size, fill and outline colours. Make selected words bold, italic, or both, with automatic wrapping and tight line spacing. Bubble sizing includes the formatted lettering, accents, descenders and overhanging letters. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
 | Optical text centering | Optionally balance the visual weight of the lettering vertically, so blocks with longer upper lines do not look top-heavy. |
 | Organised controls | Use the Text, Bubble and Tail tabs to find related options, or Import to recover moved bubbles or import old ones. The preview and page actions are shared across all tabs. |
 | Bubble padding | Adjust the space around the text, with horizontal padding changing twice as strongly as vertical padding. At 0%, only the clearance needed for the outline and shape remains, without a built-in text-size margin. |
@@ -77,6 +77,14 @@ changes made before adding a bubble to the page. New bubbles always start as
 **Oval**, including when you leave an existing bubble to create another.
 Selecting an existing bubble still restores that bubble's own saved style and
 settings.
+
+To emphasise individual words, select them in the text input and click **Bold**
+or **Italic**, or press **Ctrl+B** or **Ctrl+I** while the input has focus.
+Click again to remove that formatting. With no text selected, the controls
+toggle formatting for what you type next. You can combine bold and italic.
+Formatting appears in the preview and on the page, and is saved with the bubble
+and remembered dialogue. Pasted text uses the input's current formatting rather
+than bringing in fonts, colours or other formatting from another application.
 
 **Center automatically** uses the original plugin's word-length-based wrapping.
 For example, `Rogudator's speech bubble generator!` wraps as `Rogudator's`,

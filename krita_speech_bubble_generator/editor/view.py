@@ -8,7 +8,7 @@ from PyQt5.QtGui import QColor, QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractSpinBox, QCheckBox, QColorDialog, QComboBox, QFontComboBox, QGroupBox,
     QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea, QSlider,
-    QSizePolicy, QSpinBox, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QSizePolicy, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .preview import BubblePreview
@@ -18,6 +18,7 @@ from ..bubbles.settings import INTEGER_RANGES, BubbleSettings
 from .tail_compass import TailCompass
 from .text_resize_handle import TextResizeHandle
 from .wheel_guard import WheelGuard
+from .formatted_text import FormattedTextEdit
 
 
 class BubbleEditorView(QScrollArea):
@@ -112,7 +113,21 @@ class BubbleEditorView(QScrollArea):
         self.currentFontColorButton = self.colorButton(self.speechFontColor)
         font_row.addWidget(self.currentFontColorButton)
         speech.addLayout(font_row)
-        self.bubbleText = QTextEdit("Krita speech bubble generator!")
+        self.bubbleText = FormattedTextEdit("Krita speech bubble generator!", self)
+        emphasis_row = QHBoxLayout()
+        self.boldText = QPushButton("Bold")
+        self.italicText = QPushButton("Italic")
+        for button, bold in ((self.boldText, True), (self.italicText, False)):
+            button.setCheckable(True)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            button.setToolTip(
+                "Toggle {} for selected text or new typing ({}).".format(
+                    "bold" if bold else "italic", "Ctrl+B" if bold else "Ctrl+I"))
+            button.clicked.connect(
+                self.bubbleText.toggle_bold if bold else self.bubbleText.toggle_italic)
+            emphasis_row.addWidget(button)
+        emphasis_row.addStretch()
+        speech.addLayout(emphasis_row)
         speech.addWidget(self.bubbleText)
         self.textResizeHandle = TextResizeHandle(self.bubbleText)
         speech.addWidget(self.textResizeHandle)
@@ -327,7 +342,8 @@ class BubbleEditorView(QScrollArea):
                 control.valueChanged.connect(self._number_changed(field))
         self.speechFontSize.valueChanged.connect(self.fontSizeChanged)
         self.bubbleType.currentIndexChanged.connect(self.bubbleStyleChanged)
-        self.bubbleText.textChanged.connect(lambda: self._emit("text"))
+        self.bubbleText.textChanged.connect(lambda: self._emit("text", "text_styles"))
+        self.bubbleText.currentCharFormatChanged.connect(self._sync_emphasis)
         self.speechFont.currentFontChanged.connect(lambda: self._emit("font"))
         self.autocenter.toggled.connect(self.averageLineLength.setHidden)
         self.autocenter.toggled.connect(lambda: self._emit("autocenter"))
@@ -375,6 +391,11 @@ class BubbleEditorView(QScrollArea):
         def changed(value: int) -> None:
             self._emit(field)
         return changed
+
+    def _sync_emphasis(self) -> None:
+        formatting = self.bubbleText.currentCharFormat()
+        self.boldText.setChecked(formatting.fontWeight() >= QFont.Weight.Bold)
+        self.italicText.setChecked(formatting.fontItalic())
 
     def _destination_changed(self, index: int) -> None:
         self.destination_changed.emit(index == 0)
@@ -479,6 +500,7 @@ class BubbleEditorView(QScrollArea):
         return replace(
             self._settings, **{field: control.value() for field, control in self._numbers.items()},
             style=self.bubbleType.currentText(), text=self.bubbleText.toPlainText(),
+            text_styles=self.bubbleText.text_styles(),
             font=self.speechFont.currentFont().family(), fill=self.bubbleColor.name(),
             stroke=self.outlineColor.name(), text_color=self.speechFontColor.name(),
             autocenter=self.autocenter.isChecked(), lock_tail=self.lockTailLength.isChecked(),
@@ -488,7 +510,9 @@ class BubbleEditorView(QScrollArea):
             shout_shape=self.shoutingShape.currentText())
 
     def load_settings(self, settings: BubbleSettings) -> BubbleSettings:
-        return self._bind_settings(settings, {field.name for field in fields(BubbleSettings)})
+        loaded = self._bind_settings(settings, {field.name for field in fields(BubbleSettings)})
+        self.bubbleText.document().clearUndoRedoStacks()
+        return loaded
 
     def reflect_settings(self, settings: BubbleSettings) -> BubbleSettings:
         current = self.initial_settings().to_dict()
@@ -507,6 +531,9 @@ class BubbleEditorView(QScrollArea):
                 self.bubbleType.setCurrentText(settings.style)
             if "text" in changed and self.bubbleText.toPlainText() != settings.text:
                 self.bubbleText.setPlainText(settings.text)
+            if "text_styles" in changed or "text" in changed:
+                self.bubbleText.load_styles(settings.text_styles)
+                self._sync_emphasis()
             if "font" in changed and self.speechFont.currentFont().family() != settings.font:
                 self.speechFont.setCurrentFont(QFont(settings.font))
             if "font_size" in changed:

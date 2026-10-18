@@ -6,7 +6,9 @@ import unittest
 
 from PyQt5.QtCore import QSettings
 
-from krita_speech_bubble_generator.bubbles.settings import BubbleSettings, SettingsError
+from krita_speech_bubble_generator.bubbles.settings import (
+    BubbleSettings, SettingsError, TextStyle,
+)
 from krita_speech_bubble_generator.editor.preferences import QtPreferencesStore
 from krita_speech_bubble_generator.editor.state import EditorPreferences
 
@@ -31,7 +33,10 @@ class PreferencesTests(unittest.TestCase):
             thought_nodes=27, shout_seed=1729, thought_seed=2718,
             tail_curve=73, tail_curve_direction="Down",
             oval_custom=True, oval_vertical_padding=25, oval_squareness=80,
-            optical_center=True),
+            optical_center=True,
+            text_styles=(TextStyle(0, 8, bold=True),
+                         TextStyle(9, 11, italic=True),
+                         TextStyle(12, 25, bold=True, italic=True))),
             background_enabled=False, new_layer=False)
         self.store().save(expected)
         self.assertTrue(Path(self.path).is_file())
@@ -40,6 +45,9 @@ class PreferencesTests(unittest.TestCase):
     def test_invalid_preferences_are_not_silently_ignored(self):
         for raw in ("invalid json", "[]", '{"version": 2}',
                     '{"version": 1, "settings": {"padding": -1}}',
+                    '{"version": 1, "settings": {"text_styles": null}}',
+                    '{"version": 1, "settings": {"text": "A", "text_styles": '
+                    '[{"start": 0, "end": 2, "bold": true, "italic": false}]}}',
                     '{"version": 1, "settings": {}, "new_layer": 1}'):
             with self.subTest(raw=raw):
                 settings = QSettings(self.path, QSettings.IniFormat)

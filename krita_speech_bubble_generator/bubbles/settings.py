@@ -3,7 +3,7 @@
 from dataclasses import dataclass, fields
 import json
 import math
-from typing import Dict, Mapping, Sequence, Tuple, Union, cast
+from typing import Dict, List, Mapping, Sequence, Tuple, Union, cast
 
 from PyQt5.QtGui import QColor, QTransform
 
@@ -14,11 +14,21 @@ from .registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 ANNOTATION_PREFIX = "rsbg-bubble-"
 SHAPE_NAME = "rsbg-bubble"
 TransformValues = Tuple[float, float, float, float, float, float]
-SettingValue = Union[str, int, float, bool]
+SettingValue = Union[str, int, float, bool, List[Dict[str, Union[int, bool]]]]
 
 
 class SettingsError(ValueError):
     """A saved record cannot safely be used by the editor."""
+
+
+@dataclass(frozen=True)
+class TextStyle:
+    """A styled text run using end-exclusive Python string indices."""
+
+    start: int
+    end: int
+    bold: bool = False
+    italic: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,12 +61,18 @@ class BubbleSettings:
     thought_irregularity: int = 50
     thought_nodes: int = 16
     thought_seed: int = 0
+    text_styles: Tuple[TextStyle, ...] = ()
 
     def to_dict(self) -> Dict[str, SettingValue]:
         return {
             "version": 1,
             "style": self.style,
             "text": self.text,
+            "text_styles": [
+                {"start": run.start, "end": run.end,
+                 "bold": run.bold, "italic": run.italic}
+                for run in self.text_styles
+            ],
             "font": self.font,
             "font_size": self.font_size,
             "fill": self.fill,
@@ -95,6 +111,7 @@ class SavedBubble:
 
 # Fresh editor defaults and old records deliberately have different semantics.
 LEGACY_DEFAULTS: Dict[str, SettingValue] = {
+    "text_styles": [],
     "lock_tail": True,
     "tail_curve": 0,
     "tail_curve_direction": "Up",
@@ -172,6 +189,27 @@ def _settings_mapping(data: object) -> Mapping[object, object]:
     return cast(Mapping[object, object], data)
 
 
+def _text_styles(value: object, text: str) -> Tuple[TextStyle, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise SettingsError("Invalid text_styles")
+    runs: List[TextStyle] = []
+    previous_end = 0
+    for item in cast(Sequence[object], value):
+        if not isinstance(item, Mapping):
+            raise SettingsError("Invalid text_styles run")
+        values = cast(Mapping[object, object], item)
+        start = _integer(values.get("start"), "text_styles start",
+                         previous_end, len(text) - 1)
+        end = _integer(values.get("end"), "text_styles end", start + 1, len(text))
+        bold = _boolean(values.get("bold"), "text_styles bold")
+        italic = _boolean(values.get("italic"), "text_styles italic")
+        if not bold and not italic:
+            raise SettingsError("Invalid text_styles: run has no style")
+        runs.append(TextStyle(start, end, bold, italic))
+        previous_end = end
+    return tuple(runs)
+
+
 def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
     """Build editable values; persisted data must use the legacy codec path."""
     values = dict(_settings_mapping(data))
@@ -215,6 +253,7 @@ def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
     return BubbleSettings(
         style=style,
         text=strings["text"],
+        text_styles=_text_styles(values["text_styles"], strings["text"]),
         font=strings["font"],
         font_size=integers["font_size"],
         fill=strings["fill"],

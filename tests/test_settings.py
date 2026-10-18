@@ -1,4 +1,5 @@
 from copy import deepcopy
+from collections import UserDict
 from dataclasses import FrozenInstanceError, asdict, replace
 import json
 import math
@@ -7,7 +8,7 @@ import unittest
 from PyQt5.QtGui import QTransform
 
 from krita_speech_bubble_generator.bubbles.settings import (
-    BubbleSettings, INTEGER_RANGES, SettingsError, decode_record, encode_record,
+    BubbleSettings, INTEGER_RANGES, SettingsError, TextStyle, decode_record, encode_record,
     settings_from_dict, transform_values, validate_settings,
 )
 
@@ -31,10 +32,12 @@ class SettingsTests(unittest.TestCase):
             tail_curve=73, tail_curve_direction="Down",
             shout_irregularity=70, shout_shape="Expressive", shout_nodes=32,
             shout_seed=123, thought_irregularity=60, thought_nodes=20,
-            thought_seed=456)
+            thought_seed=456, text_styles=(TextStyle(0, 3, bold=True),))
         for settings in (BubbleSettings(), changed):
             with self.subTest(settings=settings):
-                self.assertEqual(settings.to_dict(), {"version": 1, **asdict(settings)})
+                expected = {"version": 1, **asdict(settings)}
+                expected["text_styles"] = list(expected["text_styles"])
+                self.assertEqual(settings.to_dict(), expected)
 
     def record(self, **changes):
         values = BubbleSettings().to_dict()
@@ -57,7 +60,10 @@ class SettingsTests(unittest.TestCase):
             lock_tail=False, shout_shape="Expressive", shout_seed=1729,
             thought_seed=2718, shout_nodes=37, thought_nodes=29,
             tail_curve=73, tail_curve_direction="Down", oval_custom=True,
-            oval_vertical_padding=35, oval_squareness=65, optical_center=True)
+            oval_vertical_padding=35, oval_squareness=65, optical_center=True,
+            text_styles=(TextStyle(0, 1, bold=True),
+                         TextStyle(1, 5, italic=True),
+                         TextStyle(5, 8, bold=True, italic=True)))
         baseline = QTransform(0.8, 0.2, -0.1, 1.5, -7, 12)
         encoded = encode_record(settings, baseline)
         record = decode_record(encoded)
@@ -73,6 +79,7 @@ class SettingsTests(unittest.TestCase):
             "thought_seed", "padding", "tail_curve", "tail_curve_direction",
             "oval_custom", "oval_vertical_padding", "oval_squareness",
             "optical_center",
+            "text_styles",
         ):
             del values[field]
         old = deepcopy(values)
@@ -91,9 +98,86 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(normalized["oval_vertical_padding"], 150)
         self.assertEqual(normalized["oval_squareness"], 0)
         self.assertFalse(normalized["optical_center"])
+        self.assertEqual(normalized["text_styles"], [])
         fresh = settings_from_dict({})
         self.assertEqual(fresh.shout_irregularity, 50)
         self.assertEqual(fresh.thought_irregularity, 50)
+
+    def test_text_styles_default_to_empty_for_fresh_and_saved_settings(self):
+        self.assertEqual(BubbleSettings().text_styles, ())
+        self.assertEqual(settings_from_dict({}).text_styles, ())
+        values = self.record()
+        del values["text_styles"]
+        self.assertEqual(settings_from_dict(values).text_styles, ())
+        self.assertEqual(settings_from_dict(values, legacy=True).text_styles, ())
+        self.assertEqual(decode_record(json.dumps(values).encode()).settings.text_styles, ())
+
+    def test_text_styles_are_immutable_and_encode_as_lists_of_dicts(self):
+        run = TextStyle(0, 1, bold=True)
+        self.assertFalse(run.italic)
+        self.assertFalse(TextStyle(0, 1).bold)
+        with self.assertRaises(FrozenInstanceError):
+            run.bold = False
+        settings = replace(BubbleSettings(), text_styles=(run,))
+        values = settings.to_dict()
+        self.assertEqual(values["text_styles"], [
+            {"start": 0, "end": 1, "bold": True, "italic": False}])
+        self.assertEqual(settings_from_dict(values), settings)
+        values["text_styles"][0]["end"] = 2
+        self.assertEqual(settings.text_styles, (run,))
+
+    def test_text_styles_accept_mapping_runs_and_python_unicode_offsets(self):
+        text = "A\U0001f600e\u0301Z"
+        runs = (
+            UserDict(start=1, end=2, bold=True, italic=False),
+            UserDict(start=2, end=4, bold=False, italic=True),
+            UserDict(start=4, end=5, bold=True, italic=True),
+        )
+        values = self.record(text=text, text_styles=runs)
+        original = deepcopy(values)
+        expected = (TextStyle(1, 2, bold=True), TextStyle(2, 4, italic=True),
+                    TextStyle(4, 5, bold=True, italic=True))
+        self.assertEqual(settings_from_dict(values).text_styles, expected)
+        self.assertEqual(validate_settings(values)["text_styles"],
+                         [dict(run) for run in runs])
+        self.assertEqual(values, original)
+        settings = settings_from_dict(values)
+        self.assertEqual(decode_record(encode_record(settings, QTransform())).settings,
+                         settings)
+
+    def test_malformed_text_styles_are_rejected(self):
+        run = {"start": 0, "end": 2, "bold": True, "italic": False}
+        invalid = [None, True, 1, "runs", {}, [None], [1], ["run"],
+                   [[]], [TextStyle(0, 1, bold=True)]]
+        for field in ("start", "end"):
+            for value in (None, True, False, 1.0, "1", [], {}):
+                invalid.append([{**run, field: value}])
+            invalid.append([{key: value for key, value in run.items() if key != field}])
+        for field in ("bold", "italic"):
+            for value in (None, 0, 1, "true", [], {}):
+                invalid.append([{**run, field: value}])
+            invalid.append([{key: value for key, value in run.items() if key != field}])
+        invalid.extend([
+            [{**run, "start": -1}],
+            [{**run, "start": 2}],
+            [{**run, "end": 0}],
+            [{**run, "end": -1}],
+            [{**run, "end": 6}],
+            [{**run, "bold": False}],
+            [run, {**run, "start": 1, "end": 3}],
+            [{**run, "start": 2, "end": 3}, run],
+            [run, run],
+        ])
+        for value in invalid:
+            with self.subTest(value=value):
+                values = self.record(text="A\U0001f600e\u0301Z", text_styles=value)
+                with self.assertRaisesRegex(SettingsError, "text_styles"):
+                    settings_from_dict(values)
+                with self.assertRaisesRegex(SettingsError, "text_styles"):
+                    validate_settings(values)
+        with self.assertRaisesRegex(SettingsError, "text_styles"):
+            settings_from_dict({"text": "", "text_styles": [run]})
+        self.assertEqual(settings_from_dict({"text": "", "text_styles": []}).text_styles, ())
 
     def test_optional_layer_identity_round_trips_without_changing_editable_settings(self):
         settings = BubbleSettings()
@@ -204,6 +288,9 @@ class SettingsTests(unittest.TestCase):
             encode_record(replace(BubbleSettings(), padding=-1), QTransform())
         with self.assertRaisesRegex(SettingsError, "bubble transform"):
             encode_record(BubbleSettings(), QTransform(0, 0, 0, 0, 0, 0))
+        with self.assertRaisesRegex(SettingsError, "text_styles"):
+            encode_record(replace(BubbleSettings(), text_styles=(TextStyle(0, 1),)),
+                          QTransform())
 
     def test_unknown_metadata_does_not_leak_into_editable_values(self):
         values = self.record(future_metadata={"extra": "data"})

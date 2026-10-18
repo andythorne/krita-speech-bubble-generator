@@ -12,6 +12,7 @@ from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath
 from .geometry import bubble_svg, filled_path_centroid, tail_anchor, tail_tip
 from .registry import resolve_bubble
 from .types import BubbleType, TailParameters
+from .text_runs import TextRun, speech_runs, styled_font
 
 if TYPE_CHECKING:
     from .settings import BubbleSettings
@@ -72,17 +73,21 @@ def automatic_speech_lines(text: str) -> List[str]:
 
 
 def _text_bounds(lines: List[str], metrics: QFontMetricsF, font: QFont,
-                 size: int, optical_center: bool = False) -> QRectF:
+                 size: int, optical_center: bool = False,
+                 runs: Optional[List[List[TextRun]]] = None) -> QRectF:
     half_width = 0.0
     top = -metrics.capHeight()
     bottom = (len(lines) - 1) * size
     lettering = QPainterPath()
     lettering.setFillRule(Qt.FillRule.WindingFill)
     for index, line in enumerate(lines):
-        advance = metrics.horizontalAdvance(line)
         # Shaped outlines preserve kerning, unlike tightBoundingRect's glyph sums.
         glyphs = QPainterPath()
-        glyphs.addText(0, 0, font, line)
+        advance = 0.0
+        for run in runs[index] if runs is not None else [TextRun(line)]:
+            run_font = styled_font(font, run)
+            glyphs.addText(advance, 0, run_font, run.text)
+            advance += QFontMetricsF(run_font).horizontalAdvance(run.text)
         ink = glyphs.boundingRect()
         half_width = max(half_width, advance / 2,
                          advance / 2 - ink.left(), ink.right() - advance / 2)
@@ -113,7 +118,8 @@ class BubbleRenderer:
             lines = get_speech_lines(settings.text, settings.line_length)
         font.setPixelSize(size)
         metrics = QFontMetricsF(font)
-        bounds = _text_bounds(lines, metrics, font, size, settings.optical_center)
+        bounds = _text_bounds(lines, metrics, font, size, settings.optical_center,
+                              speech_runs(settings, lines))
         bubble = self._resolve(settings.style, settings.shout_shape)
         width, height = bounds.width(), bounds.height()
         rect = bubble.enclose_text(width, height, settings)
@@ -142,12 +148,13 @@ class BubbleRenderer:
             view_box = QRectF(0, 0, max(1, rect.width()), max(1, rect.height()))
         font = QFont(settings.font)
         font.setPixelSize(settings.font_size)
+        runs = speech_runs(settings, lines)
         svg = bubble_svg(
             path, lines, text_rect, font.family(), settings.font_size,
             -_text_bounds(lines, metrics, font, settings.font_size,
-                          settings.optical_center).top(),
+                          settings.optical_center, runs).top(),
             settings.fill, settings.stroke, settings.outline,
-            settings.text_color, view_box)
+            settings.text_color, view_box, runs)
         return RenderResult(svg, view_box, tip)
 
     def move_tail(self, settings: BubbleSettings, point: QPointF) -> BubbleSettings:

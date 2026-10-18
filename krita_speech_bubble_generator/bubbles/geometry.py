@@ -4,7 +4,9 @@ from typing import Iterable, List, Optional, Tuple
 from xml.sax.saxutils import escape, quoteattr
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import QPainterPath, QPolygonF, QTransform
+from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath, QPolygonF, QTransform
+
+from .text_runs import TextRun, styled_font
 
 
 MIN_NODES = 8
@@ -232,15 +234,36 @@ def path_data(path: QPainterPath) -> str:
 def bubble_svg(path: QPainterPath, lines: Iterable[str], text_rect: QRectF,
                font_family: str, font_size: float, baseline_offset: float,
                fill: str, stroke: str, stroke_width: float, text_color: str,
-               view_box: QRectF) -> str:
+               view_box: QRectF,
+               runs: Optional[List[List[TextRun]]] = None) -> str:
     text: List[str] = []
     baseline = text_rect.top() + baseline_offset
-    for line in lines:
+    for index, line in enumerate(lines):
+        content = escape(line)
+        anchor = "middle"
+        x = text_rect.center().x()
+        if runs is not None and any(run.bold or run.italic for run in runs[index]):
+            widths: List[float] = []
+            font = QFont(font_family)
+            font.setPixelSize(round(font_size))
+            for run in runs[index]:
+                widths.append(QFontMetricsF(styled_font(font, run)).horizontalAdvance(run.text))
+            x -= sum(widths) / 2
+            anchor = "start"
+            spans: List[str] = []
+            offset = x
+            for run, width in zip(runs[index], widths):
+                spans.append(
+                    '<tspan x="{}" font-weight="{}" font-style="{}">{}</tspan>'.format(
+                        offset, "bold" if run.bold else "normal",
+                        "italic" if run.italic else "normal", escape(run.text)))
+                offset += width
+            content = "".join(spans)
         text.append(
             '<text x="{}" y="{}" font-family={} font-size="{}" '
-            'fill="{}" text-anchor="middle">{}</text>'.format(
-                text_rect.center().x(), baseline, quoteattr(font_family),
-                font_size, text_color, escape(line)))
+            'fill="{}" text-anchor="{}" xml:space="preserve">{}</text>'.format(
+                x, baseline, quoteattr(font_family),
+                font_size, text_color, anchor, content))
         baseline += font_size
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '

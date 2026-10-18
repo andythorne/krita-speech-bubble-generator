@@ -19,7 +19,8 @@ from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES
 from krita_speech_bubble_generator.bubbles.renderer import (
     BubbleRenderer, Geometry, RenderResult, automatic_speech_lines, get_speech_lines,
 )
-from krita_speech_bubble_generator.bubbles.settings import BubbleSettings
+from krita_speech_bubble_generator.bubbles.settings import BubbleSettings, TextStyle
+from krita_speech_bubble_generator.bubbles.text_runs import speech_runs
 from krita_speech_bubble_generator.bubbles.types import BubbleType
 
 
@@ -58,6 +59,53 @@ def rendered_text_centroid_y(rendered):
 
 
 class BubbleRendererTests(unittest.TestCase):
+    def test_emphasis_survives_word_wrapping_whitespace_and_unicode(self):
+        text = "\U0001f600\talpha   beta\n\nalpha beta"
+        start = text.index("beta")
+        for automatic, length in ((True, 0), (False, 8), (False, 0)):
+            settings = replace(BubbleSettings(), text=text, autocenter=automatic,
+                               line_length=length,
+                               text_styles=(TextStyle(start, start + 4, True, True),))
+            lines = self.renderer.geometry(settings).lines
+            runs = speech_runs(settings, lines)
+            self.assertEqual(["".join(run.text for run in row) for row in runs], lines)
+            emphasized = [run.text for row in runs for run in row if run.bold]
+            self.assertEqual(emphasized, ["beta"])
+            exports = [ET.fromstring(self.renderer.render(settings, preview).svg)
+                       for preview in (True, False)]
+            text_nodes = [[ET.tostring(node) for node in root.iter(SVG + "text")]
+                          for root in exports]
+            self.assertEqual(*text_nodes)
+            spans = list(exports[0].iter(SVG + "tspan"))
+            bold = [span for span in spans if span.attrib["font-weight"] == "bold"]
+            self.assertEqual([span.text for span in bold], ["beta"])
+            self.assertEqual(bold[0].attrib["font-style"], "italic")
+
+    def test_emphasis_sizing_includes_actual_formatted_ink_and_optical_centering(self):
+        settings = replace(
+            BubbleSettings(), text="Wide bold\nitalic f", font="DejaVu Sans",
+            font_size=35, autocenter=False, padding=0, style="Square",
+            text_styles=(TextStyle(0, 9, True), TextStyle(10, 18, False, True)))
+        for optical in (False, True):
+            styled = replace(settings, optical_center=optical)
+            geometry = self.renderer.geometry(styled)
+            runs = speech_runs(styled, geometry.lines)
+            root = ET.fromstring(self.renderer.render(styled).svg)
+            for node, row in zip(root.iter(SVG + "text"), runs):
+                x = float(node.attrib["x"])
+                y = float(node.attrib["y"])
+                for run in row:
+                    font = QFont(styled.font)
+                    font.setPixelSize(styled.font_size)
+                    font.setBold(run.bold)
+                    font.setItalic(run.italic)
+                    ink = glyph_bounds(font, run.text).translated(x, y)
+                    if not ink.isEmpty():
+                        self.assertTrue(geometry.text_rect.adjusted(
+                            -1e-6, -1e-6, 1e-6, 1e-6).contains(ink))
+                    x += QFontMetricsF(font).horizontalAdvance(run.text)
+            self.assertTrue(QSvgRenderer(QByteArray(ET.tostring(root))).isValid())
+
     def setUp(self):
         self.renderer = BubbleRenderer()
         self.settings = BubbleSettings(

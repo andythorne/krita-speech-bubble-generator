@@ -5,19 +5,112 @@ import math
 import unittest
 from unittest.mock import patch
 
-from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import QColor, QTextCursor
+from PyQt5.QtCore import QMimeData, QPointF, QRectF, Qt
+from PyQt5.QtGui import QColor, QFont, QTextCursor
 from PyQt5.QtTest import QSignalSpy, QTest
 from PyQt5.QtWidgets import QLabel
 
 from fake_krita import APP
 from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 from krita_speech_bubble_generator.bubbles.renderer import BubbleRenderer
-from krita_speech_bubble_generator.bubbles.settings import INTEGER_RANGES, BubbleSettings
+from krita_speech_bubble_generator.bubbles.settings import (
+    INTEGER_RANGES, BubbleSettings, TextStyle,
+)
 from krita_speech_bubble_generator.editor.view import BubbleEditorView
 
 
 class EditorViewTests(unittest.TestCase):
+    def select_text(self, start, end):
+        cursor = self.view.bubbleText.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        self.view.bubbleText.setTextCursor(cursor)
+
+    def test_selected_words_support_combined_emphasis_and_undo(self):
+        self.view.load_settings(replace(BubbleSettings(), text="One two three"))
+        self.select_text(4, 7)
+        edits = QSignalSpy(self.view.edited)
+        self.view.boldText.click()
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(4, 7, True, False),))
+        self.assertEqual(edits[-1][1], ("text", "text_styles"))
+        self.view.italicText.click()
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(4, 7, True, True),))
+        self.assertTrue(self.view.boldText.isChecked())
+        self.assertTrue(self.view.italicText.isChecked())
+        self.view.bubbleText.undo()
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(4, 7, True, False),))
+        self.select_text(4, 7)
+        self.view.boldText.click()
+        self.assertEqual(self.view.initial_settings().text_styles, ())
+        self.assertEqual(self.view.bubbleText.toPlainText(), "One two three")
+
+    def test_emphasis_moves_with_edits_and_loads_unicode_without_semantic_edits(self):
+        settings = replace(self.view.initial_settings(), text="\U0001f600 one two",
+                           text_styles=(TextStyle(6, 9, True, True),))
+        edits = QSignalSpy(self.view.edited)
+        self.assertEqual(self.view.load_settings(settings), settings)
+        self.assertEqual(len(edits), 0)
+        self.select_text(0, 0)
+        self.view.bubbleText.insertPlainText("Hi ")
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(9, 12, True, True),))
+        self.view.load_settings(replace(BubbleSettings(), text="Plain"))
+        self.assertEqual(self.view.initial_settings().text_styles, ())
+        self.select_text(0, 5)
+        self.assertLess(self.view.bubbleText.currentCharFormat().fontWeight(), QFont.Bold)
+
+    def test_keyboard_shortcuts_and_typing_without_selection(self):
+        self.view.load_settings(replace(BubbleSettings(), text=""))
+        self.view.show()
+        self.view.bubbleText.setFocus()
+        APP.processEvents()
+        QTest.keyClick(self.view.bubbleText, Qt.Key_B, Qt.ControlModifier)
+        QTest.keyClicks(self.view.bubbleText, "Bold")
+        QTest.keyClick(self.view.bubbleText, Qt.Key_I, Qt.ControlModifier)
+        QTest.keyClicks(self.view.bubbleText, "Both")
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(0, 4, True, False), TextStyle(4, 8, True, True)))
+        self.view.bubbleText.undo()
+        self.assertEqual(self.view.bubbleText.toPlainText(), "Bold")
+
+    def test_multiline_emphasis_and_paste_use_only_supported_formatting(self):
+        settings = replace(self.view.initial_settings(), text="One\nTwo",
+                           text_styles=(TextStyle(0, 7, True, True),))
+        self.assertEqual(self.view.load_settings(settings), settings)
+        self.select_text(0, 7)
+        self.view.bubbleText.insertPlainText("New")
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(0, 3, True, True),))
+        mime = QMimeData()
+        mime.setText(" pasted")
+        mime.setHtml('<span style="color:red; font-size:99pt"> pasted</span>')
+        self.view.bubbleText.insertFromMimeData(mime)
+        self.assertEqual(self.view.bubbleText.toPlainText(), "New pasted")
+        self.assertEqual(self.view.initial_settings().text_styles,
+                         (TextStyle(0, 10, True, True),))
+        self.select_text(0, 10)
+        self.view.bubbleText.insertPlainText("")
+        self.assertEqual(self.view.initial_settings().text_styles, ())
+
+    def test_loading_a_bubble_clears_previous_undo_history_even_for_identical_text(self):
+        first = replace(self.view.initial_settings(), text="Same words",
+                        text_styles=(TextStyle(0, 4, True),))
+        second = replace(first, text_styles=(TextStyle(5, 10, False, True),))
+        self.view.load_settings(first)
+        self.assertFalse(self.view.bubbleText.document().isUndoAvailable())
+        self.select_text(5, 10)
+        self.view.boldText.click()
+        self.assertTrue(self.view.bubbleText.document().isUndoAvailable())
+        self.view.load_settings(second)
+        edits = QSignalSpy(self.view.edited)
+        self.view.bubbleText.undo()
+        self.assertEqual(self.view.initial_settings(), second)
+        self.assertFalse(self.view.bubbleText.document().isUndoAvailable())
+        self.assertEqual(len(edits), 0)
+
     def setUp(self):
         self.view = BubbleEditorView()
 
