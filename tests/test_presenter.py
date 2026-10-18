@@ -15,7 +15,7 @@ from krita_speech_bubble_generator.bubbles.settings import BubbleSettings, Setti
 from krita_speech_bubble_generator.editor.contracts import GatewayError, TargetMissing
 from krita_speech_bubble_generator.editor.presenter import EditorPresenter
 from krita_speech_bubble_generator.editor.state import (
-    BubbleTarget, CanvasContext, LoadedBubble, Selection,
+    BubbleTarget, CanvasContext, EditorPreferences, LoadedBubble, Selection,
 )
 
 
@@ -24,8 +24,10 @@ class SubstituteView(QObject):
     tail_moved = pyqtSignal(object)
     page_requested = pyqtSignal(bool)
     new_requested = pyqtSignal()
+    import_requested = pyqtSignal()
     background_toggled = pyqtSignal(bool)
     refresh_requested = pyqtSignal()
+    destination_changed = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -36,6 +38,7 @@ class SubstituteView(QObject):
         self.mode = False, "New bubble"
         self.background = True, False
         self.rendered = None
+        self.new_layer = True
 
     def initial_settings(self):
         return self.settings
@@ -65,6 +68,9 @@ class SubstituteView(QObject):
 
     def warn(self, message):
         self.warnings.append(message)
+
+    def set_new_layer(self, new_layer):
+        self.new_layer = new_layer
 
 
 class SubstituteRenderer:
@@ -131,6 +137,13 @@ class SubstituteGateway:
         self.select(loaded)
         return loaded
 
+    def import_legacy(self):
+        if self.load_error:
+            raise self.load_error
+        loaded = self.record("imported", BubbleSettings(text="Old dialogue"))
+        self.select(loaded)
+        return loaded
+
     def update(self, target, settings, svg):
         self.writes.append((target, settings, svg))
         if self.update_error:
@@ -193,6 +206,80 @@ class PresenterTests(unittest.TestCase):
             self.assertEqual(timer.isSingleShot(), single)
             self.assertFalse(timer.isActive())
         self.assertEqual(self.gateway.writes, [])
+
+    def test_preferences_restore_every_bubble_option_except_default_style(self):
+        saved = EditorPreferences(
+            replace(BubbleSettings(), style="Thought", text="Remember this dialogue",
+                    padding=75, font_size=22, tail_length=63, lock_tail=False,
+                    thought_seed=101, shout_seed=202),
+            background_enabled=False, new_layer=False)
+        store = MagicMock()
+        store.load.return_value = saved
+        presenter = EditorPresenter(
+            self.view, self.gateway, self.renderer, lambda low, high: low,
+            self.owner, preferences=store)
+        self.assertEqual(self.view.settings, replace(saved.settings, style="Oval"))
+        self.assertEqual(self.view.background, (False, False))
+        self.assertFalse(self.view.new_layer)
+        presenter.hidden()
+        store.save.assert_called_once_with(replace(
+            saved, settings=replace(saved.settings, style="Oval")))
+
+    def test_preferences_save_edits_destination_background_and_hidden_state(self):
+        store = MagicMock()
+        self.presenter.preferences = store
+        self.edit(text="Saved dialogue", padding=60, style="Shouting")
+        self.assertEqual(store.save.call_args.args[0].settings, self.view.settings)
+        self.view.destination_changed.emit(False)
+        self.assertFalse(store.save.call_args.args[0].new_layer)
+        self.view.background_toggled.emit(False)
+        self.assertFalse(store.save.call_args.args[0].background_enabled)
+        self.presenter.hidden()
+        self.assertEqual(store.save.call_args.args[0], EditorPreferences(
+            self.view.settings, False, False))
+
+    def test_preferences_failures_are_reported_without_losing_the_draft(self):
+        store = MagicMock()
+        store.load.side_effect = SettingsError("Invalid preferences")
+        store.save.side_effect = SettingsError("Read-only preferences")
+        presenter = EditorPresenter(
+            self.view, self.gateway, self.renderer, lambda low, high: low,
+            self.owner, preferences=store)
+        presenter.edit(replace(self.view.settings, text="Still editable"))
+        self.assertEqual(presenter.state.draft.text, "Still editable")
+        self.assertEqual(self.view.warnings, [
+            "Cannot restore editor options: Invalid preferences",
+            "Cannot save editor options: Read-only preferences"])
+
+    def test_leaving_existing_non_oval_bubble_restores_oval_new_bubble_default(self):
+        loaded = self.bind(style="Shouting", padding=95)
+        self.assertEqual(self.view.settings.style, "Shouting")
+        self.gateway.selection = Selection(self.gateway.document)
+        self.presenter.sync_selection()
+        self.assertIsNone(self.presenter.state.target)
+        self.assertEqual(self.view.settings, replace(loaded.settings, style="Oval"))
+        self.edit(style="Thought")
+        self.presenter.sync_selection(force=True)
+        self.assertEqual(self.view.settings.style, "Thought")
+
+    def test_explicit_import_binds_without_scheduling_a_redraw(self):
+        self.view.import_requested.emit()
+        self.assertEqual(self.presenter.state.target.shape_name, "imported")
+        self.assertEqual(self.view.settings.text, "Old dialogue")
+        self.assertEqual(self.presenter.state.applied, self.view.settings)
+        self.assertIsNone(self.presenter.state.pending)
+        self.assertEqual(self.gateway.writes, [])
+        self.edit(text="Edited old dialogue")
+        self.presenter.flush_live_update()
+        self.assertEqual(self.gateway.writes[0][0].shape_name, "imported")
+
+    def test_failed_import_reports_the_error_without_rebinding(self):
+        loaded = self.bind()
+        self.gateway.load_error = SettingsError("Unsupported old artwork")
+        self.view.import_requested.emit()
+        self.assertEqual(self.view.warnings[-1], "Unsupported old artwork")
+        self.assertEqual(self.presenter.state.target, loaded.target)
+        self.assertFalse(self.presenter.state.writing)
 
     def test_only_irregularity_intents_regenerate_the_corresponding_seed(self):
         self.edit(text="Typing", tail_angle=0.9, shout_nodes=32, shout_shape="Angular",

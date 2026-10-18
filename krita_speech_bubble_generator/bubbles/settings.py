@@ -23,7 +23,7 @@ class SettingsError(ValueError):
 
 @dataclass(frozen=True)
 class BubbleSettings:
-    style: str = "Rounded"
+    style: str = "Oval"
     text: str = "Krita speech bubble generator!"
     font: str = "Segoe Print"
     font_size: int = 14

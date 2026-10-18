@@ -41,6 +41,7 @@ existing root bootstrap and public docker module remain the entry points.
 | `editor/presenter.py` | Editor transitions, pending edits, selection polling, and background scheduling. |
 | `editor/contracts.py` | View, rendering, and document-access contracts. |
 | `editor/state.py` | Explicit editing target and session values. |
+| `editor/preferences.py` | Local cross-session editor preferences, independent of document annotations. |
 | `bubbles/settings.py` | Immutable editable settings and version-1 saved-record validation/encoding. |
 | `bubbles/renderer.py` | Text measurement/wrapping and the shared preview/export pipeline. |
 | `bubbles/types.py` | `BubbleType` interface and the five bubble implementations. |
@@ -48,9 +49,10 @@ existing root bootstrap and public docker module remain the entry points.
 | `bubbles/registry.py` | Ordered built-in implementations and identifier lookup. |
 | `bubbles/geometry.py` | Shared path, tail, and SVG mathematics. |
 | `krita_host/gateway.py` | Native document reads/writes, selection resolution, annotations, and placement. |
+| `krita_host/legacy.py` | Conservative, opt-in recovery of one original-plugin outline and its text from SVG. |
 | `krita_host/canvas_context.py` | Canvas transforms and temporary background snapshots. |
 | `editor/preview.py` | Preview drawing, coordinate mapping, and tail-handle input. |
-| `editor/text_resize_handle.py`, `editor/wheel_guard.py` | Local text-resize and scroll interactions. |
+| `editor/tail_compass.py`, `editor/text_resize_handle.py`, `editor/wheel_guard.py` | Local tail presets, text-resize and scroll interactions. |
 
 The presenter consumes contracts, not concrete controls or native shapes.
 Dependencies are assembled by the docker shell. Geometry implementations must not
@@ -71,6 +73,13 @@ SVG output. Distinct strategies can supply different parameters to shared
 mechanics without copying the entire algorithm. Preserve random draw order when
 refactoring: a saved seed must continue producing the same outline.
 
+Enclosure padding is a bubble policy: non-oval styles keep a text-size-scaled
+minimum margin plus outline clearance, while Oval retains its zero-padding fit.
+Tail angles and symmetry use the line from the body center to the pointer,
+never the combined body-and-tail bounds or a nearest-edge normal. Intersect that
+ray with the actual body for the tail-length origin; do not snap to supporting
+corners or spikes. Keep dragging and preview/export consistent.
+
 Add contract coverage for each implementation, and specific geometry coverage
 where its behavior differs. A new persisted option may also require settings,
 codec, and UI changes; adding an implementation must not require editing central
@@ -88,6 +97,17 @@ selection before a delayed write, preserve eligible edits to the previous target
 and never redirect them to the newly selected bubble or document. Failed writes
 must not advance the successfully applied settings. Updates on shared layers
 must retain sibling artwork, stacking, selection, and canvas transforms.
+
+Legacy import is explicit, not part of selection polling. Reject ambiguous
+layers before modifying them, and keep the original shapes until the first
+update. Join recovered lines into automatically centered text, default to Oval,
+and fit padding through the shared renderer to account for its enclosure sizing.
+Imported settings use the same version-1 records as new bubbles.
+Recover the original tail tip as well as the body bounds. After fitting padding,
+map that tip into the regenerated body's coordinates and fit its tail through
+the renderer, rather than copying the old bounding-box extension as the new
+visible length. Preserve the original tip's canvas placement within control
+rounding, including when the old body is rotated or nonuniformly scaled.
 
 Keep Qt timers parented to the owning objects and on the GUI thread. Hide-time
 flushing, canceled background work, and programmatic-load signal suppression are
@@ -165,6 +185,12 @@ Exercise the affected workflow in a `.kra` document. For bubble editing changes,
 include adding a bubble, selecting and editing it, switching between bubbles,
 and saving and reopening the document. Check automatic updates and selection
 changes, and ensure updates do not move the bubble or alter neighbouring artwork.
+For original-plugin import, try a rounded bubble with a tail, one without a
+tail, and a square bubble. Check that import alone leaves the artwork unchanged,
+that the first edit keeps its placement, and that saving and reopening retains
+editability. Verify that unrelated artwork and multi-bubble layers are refused.
+Try the tail compass with locked, unlocked and zero-length tails, then drag to
+an angle between presets.
 
 Add regression coverage for changed behaviour where practical. Update user
 documentation when controls or workflows change, and describe your changes and

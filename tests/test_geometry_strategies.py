@@ -18,17 +18,17 @@ from krita_speech_bubble_generator.bubbles.shouting_algorithms import (
 )
 
 
-# Captured from the pre-refactor implementation, including its tail composition.
+# Captured with straight, tapered tails aligned to the bubble-center-to-tip axis.
 # Quantization makes the fixture insensitive to insignificant platform float noise.
 BASELINE_OUTLINES = {
-    ("Oval", "Balanced"): "6d0476196587299321b8c92bd7f00d25c5fc7dfb2049f082798045fa77a1913a",
-    ("Rounded", "Balanced"): "593b6cd516d27e4d0e2279f66e2417bf7d57b32503e1fa2cdcc8a118cbcc6399",
-    ("Square", "Balanced"): "94835c016130c78ff39db063511e6b6d09953831c9afd18b9981f627eea86070",
+    ("Oval", "Balanced"): "18a72f29dc7fa29fe42712387f2c8f790ec6716f2a758fab230f4f37b1541142",
+    ("Rounded", "Balanced"): "977ec98c323c78ca891fd9a7bdd4d2fed4e10d6050d8b90a840cf7a6c979d2b8",
+    ("Square", "Balanced"): "bfed0596b1825d9c402af8d8a26c99bc83557f39308ad91b831ef99ccdc21e05",
     ("Thought", "Balanced"): "05c761a460ab639815b2662c9a4db1938c9a446dd1466ec27962733ba7e5e9fd",
-    ("Shouting", "Balanced"): "99ebd87d2b14f3fa56d7dc89d02c3dca305b5ebb1aa6bd14ace4b09b69e3511a",
-    ("Shouting", "Angular"): "3c89e2cdf1461fe470e38f3ad9045ad183871b85f07970e6262983918ee5ff7e",
-    ("Shouting", "Punchy"): "8e8c6103022901e3c380cf73673ce6142e6c44b575b1b460511a4e98b2e85a20",
-    ("Shouting", "Expressive"): "c13d7420b6827e7442ae432073c35c71dab1b9cb8ed691c54e0eb2df287e89f9",
+    ("Shouting", "Balanced"): "fd0fc4f480f47a84cc7aeb140391443d69a24993a0eda3e604708def0b7cc99c",
+    ("Shouting", "Angular"): "90a2ea7183c66ddc6a68d5acbb9a117d55267d8103c8280464120eef1ec53667",
+    ("Shouting", "Punchy"): "f62a577061c736b1d1e26a5e0790a21759f784a284436f65d0f4e0f45edd422f",
+    ("Shouting", "Expressive"): "24593c819fd979adf63f2a25e0b4161766fdfbbd8b0d906e78dfd7ac86dd4bbc",
 }
 
 
@@ -56,7 +56,7 @@ class GeometryStrategyTests(unittest.TestCase):
             self.assertIsInstance(algorithm, ShoutingAlgorithm)
             self.assertEqual(type(algorithm).__bases__, (ShoutingAlgorithm,))
 
-    def test_saved_seed_outlines_and_tails_match_original_control_points(self):
+    def test_saved_seed_outlines_and_center_aligned_tails_match_control_points(self):
         for (style, algorithm), expected in BASELINE_OUTLINES.items():
             with self.subTest(style=style, algorithm=algorithm):
                 digest = hashlib.sha256()

@@ -8,21 +8,24 @@ from PyQt5.QtCore import QByteArray, QRectF, QUuid
 from PyQt5.QtGui import QTransform
 
 from ..bubbles.settings import (
-    ANNOTATION_PREFIX, SHAPE_NAME, BubbleSettings, TransformValues,
+    ANNOTATION_PREFIX, INTEGER_RANGES, SHAPE_NAME, BubbleSettings, TransformValues,
     decode_record, encode_record, transform_values,
 )
 from .canvas_context import canvas_snapshot, canvas_transform
 from .contracts import Document, Host, Node, Shape
-from ..editor.contracts import GatewayError, TargetMissing
+from .legacy import read_legacy_bubble
+from ..editor.contracts import BubbleRendering, GatewayError, TargetMissing
 from ..editor.state import BubbleTarget, CanvasContext, LoadedBubble, Selection
 
 
 class KritaGateway:
-    def __init__(self, host: Optional[Host] = None) -> None:
+    def __init__(self, host: Optional[Host] = None,
+                 renderer: Optional[BubbleRendering] = None) -> None:
         if host is None:
             from krita import Krita  # pyright: ignore[reportMissingModuleSource]
             host = Krita.instance()
         self.host = host
+        self.renderer = renderer
 
     def active_document(self) -> Optional[Document]:
         return self.host.activeDocument()
@@ -139,6 +142,69 @@ class KritaGateway:
                       name: str = SHAPE_NAME) -> None:
         document.setAnnotation(self.annotation_key(layer, name), "Speech bubble settings",
                                QByteArray(encode_record(settings, baseline)))
+
+    def import_legacy(self) -> LoadedBubble:
+        document = self.active_document()
+        layer = document.activeNode() if document is not None else None
+        if document is None or layer is None or layer.type() != "vectorlayer":
+            raise GatewayError("Select the old bubble's vector layer before importing it.")
+        if layer.locked():
+            raise GatewayError("Unlock the old bubble layer before importing it.")
+        if self.bubble_shapes(document, layer):
+            raise GatewayError("This layer already contains an editable bubble. Select it to edit.")
+        if self.renderer is None:
+            raise GatewayError("The legacy bubble renderer is not configured.")
+        legacy = read_legacy_bubble(layer.toSvg())
+        shapes = layer.shapes()
+        if len(shapes) != legacy.shape_count or any(
+                shape.type() == "groupshape" for shape in shapes):
+            raise GatewayError("Import requires one ungrouped old bubble and no other artwork.")
+        if (any(shape.name() == SHAPE_NAME for shape in shapes)
+                or document.annotation(self.annotation_key(layer))):
+            raise GatewayError("This layer already has bubble editing data; it cannot be imported.")
+        # Fit extra padding to the recovered body, including the new style's
+        # enclosure allowance rather than counting that allowance twice.
+        low, high = INTEGER_RANGES["padding"]
+        while low < high:
+            middle = (low + high + 1) // 2
+            candidate = replace(legacy.settings, padding=middle)
+            bounds = self.renderer.render(candidate).view_box
+            if (bounds.width() <= legacy.body.width()
+                    and bounds.height() <= legacy.body.height()):
+                low = middle
+            else:
+                high = middle - 1
+        settings = replace(legacy.settings, padding=low)
+        generated = self.renderer.render(settings).view_box
+        if generated.isEmpty() or document.xRes() <= 0 or document.yRes() <= 0:
+            raise GatewayError("The bubble size or document resolution is invalid.")
+        if legacy.tip is not None:
+            # Fit before placement scaling so the first redraw keeps the old tip.
+            inverse_placement, invertible = legacy.placement(generated).inverted()
+            if not invertible:
+                raise GatewayError("The old bubble placement is not invertible.")
+            point = inverse_placement.map(legacy.transform.map(legacy.tip))
+            fitted = self.renderer.move_tail(replace(settings, lock_tail=False), point)
+            settings = replace(fitted, lock_tail=settings.lock_tail)
+        delta = QTransform.fromScale(document.xRes() / 72, document.xRes() / 72) * (
+            legacy.placement(generated))
+        inverse, invertible = delta.inverted()
+        if not invertible:
+            raise GatewayError("The old bubble placement is not invertible.")
+        group = self.bubble_group(layer, shapes)
+        if group is None:
+            raise GatewayError("Krita could not group the old bubble shapes.")
+        # A synthetic import baseline lets the first redraw retain the old body's
+        # canvas placement even though its original shapes used unrelated origins.
+        baseline = group.transformation() * inverse
+        self.save_settings(document, layer, settings, baseline)
+        for shape in shapes:
+            self.deselect_shape(shape)
+        group.select()
+        self.refresh_canvas(document)
+        return LoadedBubble(
+            BubbleTarget(document, layer.uniqueId(), SHAPE_NAME, transform_values(baseline)),
+            settings, layer.name())
 
     def create(self, settings: BubbleSettings, svg: str,
                new_layer: bool) -> LoadedBubble:

@@ -7,7 +7,7 @@ import unittest
 PACKAGE = Path(__file__).resolve().parents[1] / "krita_speech_bubble_generator"
 EXTERNAL_MODULES = {
     "__future__", "abc", "collections", "contextlib", "dataclasses", "importlib",
-    "json", "math", "random", "sys", "typing", "uuid", "xml", "PyQt5", "krita",
+    "json", "math", "random", "re", "sys", "typing", "uuid", "xml", "PyQt5", "krita",
 }
 
 

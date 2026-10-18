@@ -1,12 +1,19 @@
 """Values owned by an editor session, never native shape handles."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from PyQt5.QtCore import QRectF
 from PyQt5.QtGui import QImage, QTransform
 
 from ..bubbles.settings import BubbleSettings, TransformValues
+
+
+@dataclass(frozen=True)
+class EditorPreferences:
+    settings: BubbleSettings = field(default_factory=BubbleSettings)
+    background_enabled: bool = True
+    new_layer: bool = True
 
 
 @dataclass(frozen=True)

@@ -62,10 +62,15 @@ def outline_anchor(path: QPainterPath, center: QPointF, direction: QPointF) -> Q
     return center + direction * max(distances)
 
 
+def tail_anchor(path: QPainterPath, center: QPointF, direction: QPointF) -> QPointF:
+    """Intersect the center-to-pointer axis with the bubble body."""
+    return outline_anchor(path, center, direction)
+
+
 def tail_tip(path: QPainterPath, center: QPointF, angle: float,
              length: float) -> QPointF:
     direction = QPointF(math.cos(angle), math.sin(angle))
-    return outline_anchor(path, center, direction) + direction * length
+    return tail_anchor(path, center, direction) + direction * length
 
 
 def bubble_path(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
@@ -85,10 +90,10 @@ def _tail_geometry(body: QPainterPath, center: QPointF,
         return None
     offset = tip - center
     distance = math.hypot(offset.x(), offset.y())
-    if distance < 1e-9:
+    if distance < 1e-6:
         return None
     direction = offset / distance
-    anchor = outline_anchor(body, center, direction)
+    anchor = tail_anchor(body, center, direction)
     length = math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y())
     if length < 1e-6:
         return None
@@ -124,18 +129,19 @@ def speech_tail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
     geometry = _tail_geometry(body, center, tip)
     if geometry is None or tip is None:
         return QPainterPath(body)
-    direction, anchor, length = geometry
+    direction, anchor, _ = geometry
     perpendicular = QPointF(-direction.y(), direction.x())
     left = outline_anchor(body, center, perpendicular) - center
     right = outline_anchor(body, center, -perpendicular) - center
     inside_radius = min(math.hypot(left.x(), left.y()), math.hypot(right.x(), right.y()))
-    half_width = min(font_size * 0.65, length * 0.5, inside_radius * 0.5)
+    half_width = min(font_size * 0.4, inside_radius * 0.5)
     tail = QPainterPath()
-    # Start inside the body, not just behind the ray intersection: at shallow
-    # angles a short, perpendicular triangle base can lie entirely outside it.
+    # Both sides share the bubble-center-to-tip axis, including the inset base.
     tail.moveTo(center + perpendicular * half_width)
-    tail.quadTo(anchor + perpendicular * half_width, tip)
-    tail.quadTo(anchor - perpendicular * half_width, center - perpendicular * half_width)
+    tail.lineTo(anchor + perpendicular * half_width)
+    tail.lineTo(tip)
+    tail.lineTo(anchor - perpendicular * half_width)
+    tail.lineTo(center - perpendicular * half_width)
     tail.closeSubpath()
     return body.united(tail)
 
@@ -178,7 +184,7 @@ def bubble_svg(path: QPainterPath, lines: Iterable[str], text_rect: QRectF,
             'fill="{}" text-anchor="middle">{}</text>'.format(
                 text_rect.center().x(), baseline, quoteattr(font_family),
                 font_size, text_color, escape(line)))
-        baseline += font_size * 1.3
+        baseline += font_size
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
         'viewBox="{x} {y} {w} {h}">'

@@ -9,7 +9,7 @@ from typing import Callable, List, NamedTuple, Optional, TYPE_CHECKING
 from PyQt5.QtCore import QPointF, QRectF
 from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath
 
-from .geometry import bubble_svg, outline_anchor, tail_tip
+from .geometry import bubble_svg, tail_anchor, tail_tip
 from .registry import resolve_bubble
 from .types import BubbleType, TailParameters
 
@@ -51,22 +51,23 @@ def get_speech_lines(text: str, line_length: float,
     return lines
 
 
-def automatic_speech_lines(text: str, width: float,
-                           measure: Callable[[str], float]) -> List[str]:
+def automatic_speech_lines(text: str) -> List[str]:
+    threshold = max(1, int(math.sqrt(len(text)) * 1.8))
     result: List[str] = []
     for paragraph in text.split("\n"):
-        lines = get_speech_lines(paragraph, width, measure)
-        if len(lines) > 1:
-            low = min(width, max(measure(word) for word in paragraph.split()))
-            high = width
-            for _ in range(10):
-                middle = (low + high) / 2
-                if len(get_speech_lines(paragraph, middle, measure)) <= len(lines):
-                    high = middle
-                else:
-                    low = middle
-            lines = get_speech_lines(paragraph, high, measure)
-        result.extend(lines)
+        paragraph_words = paragraph.split()
+        words: List[str] = []
+        count = 0
+        for word in paragraph_words:
+            words.append(word)
+            count += len(word)
+            # The original wraps after reaching the threshold, excluding spaces.
+            if count >= threshold:
+                result.append(" ".join(words))
+                words = []
+                count = 0
+        if words or not paragraph_words:
+            result.append(" ".join(words))
     return result
 
 
@@ -77,20 +78,16 @@ class BubbleRenderer:
     def geometry(self, settings: BubbleSettings) -> Geometry:
         size = settings.font_size
         font = QFont(settings.font)
-        font.setPixelSize(size)
-        metrics = QFontMetricsF(font)
         if settings.autocenter:
-            total_width = sum(metrics.horizontalAdvance(line)
-                              for line in settings.text.split("\n"))
-            target_width = max(size * 16, math.sqrt(total_width * size * 1.3 * 2))
-            lines = automatic_speech_lines(
-                settings.text, target_width, metrics.horizontalAdvance)
+            lines = automatic_speech_lines(settings.text)
         else:
             lines = get_speech_lines(settings.text, settings.line_length)
+        font.setPixelSize(int(size * 1.3))
+        metrics = QFontMetricsF(font)
         width = max(metrics.horizontalAdvance(line) for line in lines)
-        height = metrics.height() + (len(lines) - 1) * size * 1.3
+        height = metrics.capHeight() + (len(lines) - 1) * size
         bubble = self._resolve(settings.style, settings.shout_shape)
-        padding = size * settings.padding / 100
+        padding = bubble.enclosure_padding(settings)
         rect = bubble.body_rect(width, height, padding)
         text_rect = QRectF((rect.width() - width) / 2,
                           (rect.height() - height) / 2, width, height)
@@ -116,7 +113,7 @@ class BubbleRenderer:
             view_box = QRectF(0, 0, max(1, rect.width()), max(1, rect.height()))
         svg = bubble_svg(
             path, lines, text_rect, QFont(settings.font).family(), settings.font_size,
-            metrics.ascent(), settings.fill, settings.stroke, settings.outline,
+            metrics.capHeight(), settings.fill, settings.stroke, settings.outline,
             settings.text_color, view_box)
         return RenderResult(svg, view_box, tip)
 
@@ -126,12 +123,15 @@ class BubbleRenderer:
         offset = point - center
         if math.hypot(offset.x(), offset.y()) < 1e-6:
             return settings
+        handle = tail_tip(body, center, settings.tail_angle, settings.tail_length)
+        if math.hypot(point.x() - handle.x(), point.y() - handle.y()) < 1e-6:
+            return settings
         angle = math.atan2(offset.y(), offset.x())
         length = settings.tail_length
         if not settings.lock_tail:
             direction = QPointF(math.cos(angle), math.sin(angle))
-            anchor = outline_anchor(body, center, direction)
-            distance = (point.x() - anchor.x()) * direction.x() + (
-                point.y() - anchor.y()) * direction.y()
+            anchor = tail_anchor(body, center, direction)
+            distance = ((point.x() - anchor.x()) * direction.x()
+                        + (point.y() - anchor.y()) * direction.y())
             length = max(0, min(settings.font_size * 10, round(distance)))
         return replace(settings, tail_angle=angle, tail_length=length)

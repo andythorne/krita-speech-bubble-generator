@@ -13,6 +13,13 @@ from krita_speech_bubble_generator.bubbles.settings import (
 
 
 class SettingsTests(unittest.TestCase):
+    def test_defaults_use_oval_without_overriding_saved_styles(self):
+        self.assertEqual(BubbleSettings().style, "Oval")
+        self.assertEqual(settings_from_dict({}).style, "Oval")
+        for style in ("Oval", "Rounded", "Square", "Thought", "Shouting"):
+            with self.subTest(style=style):
+                self.assertEqual(settings_from_dict({"style": style}).style, style)
+
     def test_serialization_includes_every_setting_with_its_current_value(self) -> None:
         changed = BubbleSettings(
             style="Shouting", text="Changed", font="Serif", font_size=20,

@@ -11,6 +11,7 @@ from krita import (  # pyright: ignore[reportMissingModuleSource]
 
 from .bubbles.renderer import BubbleRenderer
 from .editor.presenter import EditorPresenter
+from .editor.preferences import QtPreferencesStore
 from .editor.view import BubbleEditorView
 from .krita_host.gateway import KritaGateway
 
@@ -20,10 +21,11 @@ class SpeechBubbleDocker(DockWidget):
         super().__init__()
         self.setWindowTitle("Krita Speech Bubble Generator")
         self.view = BubbleEditorView(self)
-        self.gateway = KritaGateway()
         self.renderer = BubbleRenderer()
+        self.gateway = KritaGateway(renderer=self.renderer)
         self.presenter = EditorPresenter(
-            self.view, self.gateway, self.renderer, random.randrange, self)
+            self.view, self.gateway, self.renderer, random.randrange, self,
+            preferences=QtPreferencesStore())
         self.setWidget(self.view)
 
     def canvasChanged(self, canvas: object) -> None:

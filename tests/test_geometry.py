@@ -8,7 +8,7 @@ from PyQt5.QtCore import QPointF, QRectF
 
 from fake_krita import APP
 from krita_speech_bubble_generator.bubbles.geometry import (
-    body_path, bubble_path, outline_anchor, path_data, tail_tip,
+    body_path, bubble_path, path_data, tail_anchor, tail_tip,
 )
 from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 
@@ -39,7 +39,7 @@ class GeometryTests(unittest.TestCase):
                     angle = math.radians(degrees)
                     tip = tail_tip(body, rect.center(), angle, 60)
                     direction = QPointF(math.cos(angle), math.sin(angle))
-                    anchor = outline_anchor(body, rect.center(), direction)
+                    anchor = tail_anchor(body, rect.center(), direction)
                     self.assertAlmostEqual(
                         math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y()), 60)
                     self.assertFalse(body.contains(tip))
@@ -57,6 +57,78 @@ class GeometryTests(unittest.TestCase):
             body = body_path(QRectF(0, 0, 240, 100), style)
             self.assertEqual(bubble_path(body, QPointF(120, 50), None, style, 14), body)
             self.assertEqual(bubble_path(body, QPointF(120, 50), QPointF(120, 50), style, 14), body)
+
+    def test_small_speech_tails_keep_a_visible_width_without_extending_the_tip(self):
+        rect = QRectF(0, 0, 240, 100)
+        for style in ("Oval", "Rounded", "Square", "Shouting"):
+            body = body_path(rect, style)
+            for degrees in range(0, 360, 45):
+                with self.subTest(style=style, degrees=degrees):
+                    angle = math.radians(degrees)
+                    direction = QPointF(math.cos(angle), math.sin(angle))
+                    perpendicular = QPointF(-direction.y(), direction.x())
+                    anchor = tail_anchor(body, rect.center(), direction)
+                    tip = tail_tip(body, rect.center(), angle, 3)
+                    path = bubble_path(body, rect.center(), tip, style, 14)
+                    self.assertAlmostEqual(math.hypot(
+                        tip.x() - anchor.x(), tip.y() - anchor.y()), 3)
+                    for side in (-1, 1):
+                        point = anchor + direction * 1.5 + perpendicular * side
+                        self.assertFalse(body.contains(point))
+                        self.assertTrue(path.contains(point))
+                    self.assertFalse(path.contains(tip + direction * 0.01))
+                    self.assertEqual(body.subtracted(path).elementCount(), 0)
+
+    def test_diagonal_tail_is_symmetric_about_the_bubble_center_to_tip_axis(self):
+        for style in ("Oval", "Rounded", "Square", "Shouting"):
+            for width, height in ((240, 100), (100, 240)):
+                rect = QRectF(0, 0, width, height)
+                body = body_path(rect, style)
+                for degrees in (45, 135, 225, 315):
+                    with self.subTest(style=style, width=width, degrees=degrees):
+                        angle = math.radians(degrees)
+                        direction = QPointF(math.cos(angle), math.sin(angle))
+                        perpendicular = QPointF(-direction.y(), direction.x())
+                        anchor = tail_anchor(body, rect.center(), direction)
+                        tip = tail_tip(body, rect.center(), angle, 60)
+                        self.assertAlmostEqual(abs(tip.x() - anchor.x()),
+                                               abs(tip.y() - anchor.y()))
+                        self.assertAlmostEqual(
+                            (tip - rect.center()).x() * direction.y()
+                            - (tip - rect.center()).y() * direction.x(), 0)
+                        path = bubble_path(body, rect.center(), tip, style, 14)
+                        for along in (5, 15, 30, 45, 55):
+                            axis = anchor + direction * along
+                            self.assertTrue(path.contains(axis))
+                            for offset in (0.5, 1, 2, 4, 6, 8, 10):
+                                left = axis + perpendicular * offset
+                                right = axis - perpendicular * offset
+                                if not body.contains(left) and not body.contains(right):
+                                    self.assertEqual(path.contains(left), path.contains(right))
+
+    def test_speech_tail_has_a_narrow_straight_taper_without_a_leaf_shaped_bulge(self):
+        rect = QRectF(0, 0, 240, 100)
+        font_size = 14
+        for style in ("Oval", "Rounded", "Square", "Shouting"):
+            body = body_path(rect, style)
+            for degrees in (45, 135, 225, 315):
+                angle = math.radians(degrees)
+                direction = QPointF(math.cos(angle), math.sin(angle))
+                perpendicular = QPointF(-direction.y(), direction.x())
+                anchor = tail_anchor(body, rect.center(), direction)
+                for length in (3, 14, 60):
+                    with self.subTest(style=style, degrees=degrees, length=length):
+                        tip = tail_tip(body, rect.center(), angle, length)
+                        path = bubble_path(body, rect.center(), tip, style, font_size)
+                        for fraction in (0.1, 0.25, 0.5, 0.75, 0.9):
+                            axis = anchor + direction * (length * fraction)
+                            half_width = font_size * 0.4 * (1 - fraction)
+                            for side in (-1, 1):
+                                self.assertTrue(path.contains(
+                                    axis + perpendicular * (side * half_width * 0.9)))
+                                outside = axis + perpendicular * (side * (half_width + 0.15))
+                                if not body.contains(outside):
+                                    self.assertFalse(path.contains(outside))
 
     def test_styles_have_distinct_outlines(self):
         paths = [body_path(QRectF(0, 0, 240, 100), style) for style in STYLES]
@@ -81,7 +153,7 @@ class GeometryTests(unittest.TestCase):
         rect = QRectF(0, 0, 240, 100)
         body = body_path(rect, "Thought")
         tip = tail_tip(body, rect.center(), 0, 100)
-        anchor = outline_anchor(body, rect.center(), QPointF(1, 0))
+        anchor = tail_anchor(body, rect.center(), QPointF(1, 0))
         first_center = anchor + (tip - anchor) * 0.25
         small = bubble_path(body, rect.center(), tip, "Thought", 14, 100)
         large = bubble_path(body, rect.center(), tip, "Thought", 14, 400)
@@ -227,7 +299,7 @@ class GeometryTests(unittest.TestCase):
             for degrees in range(0, 360, 5):
                 angle = math.radians(degrees)
                 direction = QPointF(math.cos(angle), math.sin(angle))
-                anchor = outline_anchor(body, rect.center(), direction)
+                anchor = tail_anchor(body, rect.center(), direction)
                 tip = tail_tip(body, rect.center(), angle, 60)
                 path = bubble_path(body, rect.center(), tip, "Shouting", 14)
                 self.assertAlmostEqual(math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y()), 60)

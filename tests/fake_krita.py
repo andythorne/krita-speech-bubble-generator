@@ -49,6 +49,7 @@ class FakeShape:
         self.selected = False
         self.z_index = 0
         self.is_visible = True
+        self.child_items = []
 
     def isSelected(self):
         return self.selected
@@ -69,7 +70,7 @@ class FakeShape:
         self.is_visible = visible
 
     def children(self):
-        return []
+        return list(self.child_items)
 
     def type(self):
         return "groupshape"
@@ -112,6 +113,7 @@ class FakeLayer:
         self.is_locked = False
         self.fail_import = False
         self.events = []
+        self.svg = ""
 
     def uniqueId(self):
         return self.identifier
@@ -131,6 +133,18 @@ class FakeLayer:
 
     def shapes(self):
         return list(self.items)
+
+    def toSvg(self):
+        return self.svg
+
+    def createGroupShape(self, name, shapes):
+        group = FakeShape(self, QTransform())
+        group.setName(name)
+        group.child_items = list(shapes)
+        for shape in shapes:
+            self.items.remove(shape)
+        self.items.append(group)
+        return group
 
     def addShapesFromSvg(self, svg):
         if self.fail_import:

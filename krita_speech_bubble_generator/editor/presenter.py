@@ -8,24 +8,43 @@ from PyQt5.QtCore import QObject, QPointF, QTimer
 from ..bubbles.settings import BubbleSettings, SettingsError
 from .contracts import (
     BubbleGateway, BubbleRendering, EditorView, GatewayError, PreviewContext, SeedSupplier,
-    TargetMissing,
+    PreferencesStore, TargetMissing,
 )
-from .state import BubbleTarget, CanvasContext, EditorSession, LoadedBubble, PendingEdit
+from .state import (
+    BubbleTarget, CanvasContext, EditorPreferences, EditorSession, LoadedBubble, PendingEdit,
+)
 
 
 class EditorPresenter(QObject):
     def __init__(self, view: EditorView, gateway: BubbleGateway,
                  renderer: BubbleRendering, seed_supplier: SeedSupplier,
-                 parent: Optional[QObject] = None) -> None:
+                 parent: Optional[QObject] = None,
+                 preferences: Optional[PreferencesStore] = None) -> None:
         super().__init__(parent)
         self.view = view
         self.gateway = gateway
         self.renderer = renderer
         self.seed_supplier = seed_supplier
+        self.preferences = preferences
+        self._new_layer = True
+        saved = None
+        if preferences is not None:
+            try:
+                saved = preferences.load()
+            except SettingsError as error:
+                view.warn("Cannot restore editor options: " + str(error))
         initial = replace(view.initial_settings(),
                           shout_seed=seed_supplier(0, 2 ** 31),
                           thought_seed=seed_supplier(0, 2 ** 31))
+        if saved is not None:
+            initial = saved.settings
+            self._new_layer = saved.new_layer
+        initial = replace(initial, style=BubbleSettings().style)
         self.state = EditorSession(view.load_settings(initial))
+        if saved is not None:
+            self.state.background_enabled = saved.background_enabled
+        view.set_new_layer(self._new_layer)
+        view.show_background(self.state.background_enabled, False)
         self.live_timer = self._timer(150, self.apply_live_update, single=True)
         self.selection_timer = self._timer(150, self.sync_selection)
         self.background_timer = self._timer(250, self.refresh_moved_background, single=True)
@@ -35,9 +54,23 @@ class EditorPresenter(QObject):
             self.page_action(new_layer)
         view.page_requested.connect(request_page)
         view.new_requested.connect(self.start_new)
+        view.import_requested.connect(self.import_legacy)
         view.background_toggled.connect(self.toggle_background)
         view.refresh_requested.connect(self.refresh_background)
+        view.destination_changed.connect(self.set_destination)
         self.render()
+
+    def _save_preferences(self) -> None:
+        if self.preferences is not None:
+            try:
+                self.preferences.save(EditorPreferences(
+                    self.state.draft, self.state.background_enabled, self._new_layer))
+            except SettingsError as error:
+                self.view.warn("Cannot save editor options: " + str(error))
+
+    def set_destination(self, new_layer: bool) -> None:
+        self._new_layer = new_layer
+        self._save_preferences()
 
     def _timer(self, interval: int, callback: Callable[[], object],
                single: bool = False) -> QTimer:
@@ -63,6 +96,7 @@ class EditorPresenter(QObject):
                     settings, **{seed: (current
                                        + self.seed_supplier(1, 2 ** 31)) % (2 ** 31)})
         self.state.draft = self.view.reflect_settings(settings)
+        self._save_preferences()
         self.render()
         if self.state.writing:
             return
@@ -151,12 +185,35 @@ class EditorPresenter(QObject):
         self.flush_live_update()
         selection = self.gateway.deselect()
         self.stop_editing()
+        self.state.draft = self.view.reflect_settings(
+            replace(self.state.draft, style=BubbleSettings().style))
+        self.render()
         self.state.observed = selection
         self.view.show_mode(False, "New bubble")
+
+    def import_legacy(self) -> None:
+        if self.state.loading or self.state.writing:
+            return
+        self.flush_live_update()
+        self.state.writing = True
+        try:
+            loaded = self.gateway.import_legacy()
+        except (GatewayError, SettingsError) as error:
+            self.view.warn(str(error))
+            return
+        finally:
+            self.state.writing = False
+        self.bind(loaded)
+        self.view.show_mode(
+            True, "Imported: " + loaded.layer_name
+            + " - first update redraws the bubble; layout and per-word formatting may change.")
 
     def stop_editing(self) -> None:
         self._cancel_live()
         self._cancel_background()
+        if self.state.target is not None:
+            self.state.draft = self.view.reflect_settings(
+                replace(self.state.draft, style=BubbleSettings().style))
         self.state.target = None
         self.state.applied = None
         self.view.show_mode(False, "New bubble - select a bubble to edit")
@@ -272,6 +329,7 @@ class EditorPresenter(QObject):
     def toggle_background(self, enabled: bool) -> None:
         self._cancel_background()
         self.state.background_enabled = enabled
+        self._save_preferences()
         self.view.show_background(enabled, self.state.target is not None)
         if enabled:
             self.refresh_background()
@@ -312,5 +370,6 @@ class EditorPresenter(QObject):
 
     def hidden(self) -> None:
         self.flush_live_update()
+        self._save_preferences()
         self.selection_timer.stop()
         self._cancel_background()

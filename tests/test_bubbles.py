@@ -1,29 +1,34 @@
 """Editor workflows spanning the real Qt view and substitute native host."""
 
+from dataclasses import replace
 import json
 import math
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt
+from PyQt5.QtCore import QByteArray, QPoint, QPointF, QRectF, QSettings, Qt
 from PyQt5.QtGui import QColor, QFontDatabase, QImage, QTransform, QWheelEvent
 from PyQt5.QtTest import QTest
 from PyQt5.QtWidgets import QApplication, QCheckBox, QPushButton
 
 from fake_krita import APP, FakeDocument, FakeKrita, FakeLayer, FakeShape
+from legacy_fixture import legacy_svg
 
 from krita_speech_bubble_generator.bubbles.geometry import (
-    body_path, outline_anchor, tail_tip,
+    body_path, tail_anchor, tail_tip,
 )
 from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 from krita_speech_bubble_generator.krita_speech_bubble_generator import (
     SpeechBubbleDocker,
 )
 from krita_speech_bubble_generator.bubbles.settings import SHAPE_NAME
+from krita_speech_bubble_generator.editor.preferences import QtPreferencesStore
 from editor_harness import EditorHarness
 from krita_speech_bubble_generator.krita_host.canvas_context import canvas_transform
 
@@ -34,6 +39,15 @@ SHOUTING_SHAPES = tuple(SHOUTING_ALGORITHMS)
 
 class EditorTests(unittest.TestCase):
     def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        preferences_path = str(Path(directory.name) / "preferences.ini")
+        preferences_patch = patch(
+            "krita_speech_bubble_generator.krita_speech_bubble_generator.QtPreferencesStore",
+            side_effect=lambda: QtPreferencesStore(
+                QSettings(preferences_path, QSettings.IniFormat)))
+        preferences_patch.start()
+        self.addCleanup(preferences_patch.stop)
         image = QImage(32, 24, QImage.Format_ARGB32)
         image.fill(QColor("white"))
         self.snapshotPatch = patch(
@@ -65,6 +79,62 @@ class EditorTests(unittest.TestCase):
         self.docker.setEditTarget(document, layer, baseline)
         return document, layer, group
 
+    def test_reopening_docker_restores_dialogue_and_options_but_starts_with_oval(self):
+        self.docker.bubbleText.setPlainText("Remember all of this\nNext session")
+        self.docker.bubbleType.setCurrentText("Shouting")
+        self.docker.speechFontSize.setValue(23)
+        self.docker.paddingSpinBox.setValue(65)
+        self.docker.outlineSpinBox.setValue(7)
+        self.docker.tailSpinBox.setValue(87)
+        self.docker.shoutingShape.setCurrentText("Expressive")
+        self.docker.shoutingNodesSpinBox.setValue(31)
+        self.docker.addDestination.setCurrentIndex(1)
+        self.docker.canvasBackground.setChecked(False)
+        expected = replace(self.docker.presenter.state.draft, style="Oval")
+        reopened = SpeechBubbleDocker()
+        try:
+            self.assertEqual(reopened.presenter.state.draft, expected)
+            self.assertEqual(reopened.view.addDestination.currentIndex(), 1)
+            self.assertFalse(reopened.view.canvasBackground.isChecked())
+            self.assertIsNone(reopened.presenter.state.target)
+        finally:
+            reopened.close()
+            reopened.deleteLater()
+
+    def test_import_then_compass_edit_updates_only_after_user_edit_and_reloads(self):
+        layer = FakeLayer()
+        layer.svg = legacy_svg()
+        document = FakeDocument(layer)
+        FakeKrita.document = document
+        for index in range(3):
+            shape = FakeShape(layer, QTransform())
+            shape.setName("shape" + str(index))
+            shape.type = lambda: "pathshape"
+            layer.items.append(shape)
+        originals = layer.shapes()
+        self.docker.view.importOldBubble.click()
+        self.warn.assert_not_called()
+        self.assertEqual(layer.items[0].children(), originals)
+        self.assertEqual(self.docker.bubbleText.toPlainText(), "First & second A bold word")
+        self.assertTrue(self.docker.autocenter.isChecked())
+        self.assertEqual(self.docker.bubbleType.currentText(), "Oval")
+        self.assertEqual(self.docker.addOnPage.text(), "Update on Page")
+        self.assertTrue(self.docker.view.importOldBubble.isHidden())
+        self.assertFalse(self.docker.liveTimer.isActive())
+        self.assertIn("first update redraws", self.docker.editStatus.text())
+        self.docker.view.tailCompass.buttons["SE"].click()
+        self.assertEqual(self.docker.tailAngle, math.pi / 4)
+        self.assertEqual(self.docker.tailSpinBox.value(), 10)
+        self.docker.flushLiveUpdate()
+        self.warn.assert_not_called()
+        self.assertEqual(len(layer.items), 1)
+        self.assertNotEqual(layer.items[0].children(), originals)
+        self.docker.stopEditing()
+        self.docker.loadSelectedBubble()
+        self.assertEqual(self.docker.tailAngle, math.pi / 4)
+        self.assertTrue(self.docker.view.tailCompass.buttons["SE"].isChecked())
+        self.assertEqual(self.docker.bubbleText.toPlainText(), "First & second A bold word")
+
     def test_svg_handles_special_characters_and_empty_text(self):
         self.docker.autocenter.setChecked(False)
         for text in ("", "A & B <C>\n\"quoted\"", "Wide WWW\niiiiiiiii"):
@@ -87,12 +157,12 @@ class EditorTests(unittest.TestCase):
         rect, text_rect, body, path, tip, lines, metrics = self.docker.geometry()
         self.assertGreaterEqual(text_rect.width(), metrics.horizontalAdvance("WWWW"))
 
-    def test_auto_layout_preserves_short_phrases_and_wraps_long_speech(self):
+    def test_auto_layout_matches_original_wrapping_and_preserves_paragraph_breaks(self):
         self.docker.bubbleText.setPlainText("This is a new one")
-        self.assertEqual(self.docker.geometry()[5], ["This is a new one"])
+        self.assertEqual(self.docker.geometry()[5], ["This is a", "new one"])
         self.docker.bubbleText.setPlainText("This is a new one\nWith a deliberate line break")
         self.assertEqual(self.docker.geometry()[5],
-                         ["This is a new one", "With a deliberate line break"])
+                         ["This is a new one", "With a deliberate", "line break"])
         text = "A longer piece of dialogue that needs more than one line. " * 8
         self.docker.bubbleText.setPlainText(text)
         lines = self.docker.geometry()[5]
@@ -144,7 +214,7 @@ class EditorTests(unittest.TestCase):
                     geometry[0], "Shouting", irregularity=79, seed=17, shouting_shape=shape,
                     nodes=self.docker.shoutingNodesSpinBox.value()))
                 direction = QPointF(math.cos(self.docker.tailAngle), math.sin(self.docker.tailAngle))
-                anchor = outline_anchor(geometry[2], geometry[0].center(), direction)
+                anchor = tail_anchor(geometry[2], geometry[0].center(), direction)
                 self.assertAlmostEqual(math.hypot(geometry[4].x() - anchor.x(),
                                                  geometry[4].y() - anchor.y()), 60)
                 self.assertTrue(self.docker.preview.renderer().isValid())
@@ -212,7 +282,7 @@ class EditorTests(unittest.TestCase):
                                          (before[0], before[1], before[5]))
                         direction = QPointF(math.cos(self.docker.tailAngle),
                                             math.sin(self.docker.tailAngle))
-                        anchor = outline_anchor(geometry[2], geometry[0].center(), direction)
+                        anchor = tail_anchor(geometry[2], geometry[0].center(), direction)
                         self.assertAlmostEqual(math.hypot(geometry[4].x() - anchor.x(),
                                                          geometry[4].y() - anchor.y()), 60)
                         self.assertTrue(self.docker.preview.renderer().isValid())
@@ -286,7 +356,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.docker.thoughtSizeSpinBox.value(), 200)
         self.assertEqual(self.docker.tailSpinBox.value(), 60)
         direction = QPointF(math.cos(self.docker.tailAngle), math.sin(self.docker.tailAngle))
-        anchor = outline_anchor(after[2], after[0].center(), direction)
+        anchor = tail_anchor(after[2], after[0].center(), direction)
         self.assertAlmostEqual(math.hypot(after[4].x() - anchor.x(), after[4].y() - anchor.y()), 60)
         self.docker.bubbleType.setCurrentText("Shouting")
         self.assertTrue(self.docker.thoughtGroup.isHidden())
@@ -315,25 +385,33 @@ class EditorTests(unittest.TestCase):
         self.assertNotIn("Edit selected bubble", [
             control.text() for control in self.docker.findChildren(QPushButton)])
 
-    def test_speech_controls_are_immediately_below_the_preview(self):
+    def test_option_tabs_follow_preview_context_and_contain_import(self):
         layout = self.docker.widget().widget().layout()
-        self.assertEqual(layout.indexOf(self.docker.speechGroup),
-                         layout.indexOf(self.docker.preview) + 1)
+        self.assertEqual(layout.indexOf(self.docker.optionsTabs),
+                         layout.indexOf(self.docker.preview) + 2)
+        self.assertEqual(layout.indexOf(self.docker.optionsTabs), layout.count() - 1)
+        self.assertTrue(self.docker.importTab.isAncestorOf(self.docker.importOldBubble))
+        self.assertTrue(self.docker.textTab.isAncestorOf(self.docker.speechGroup))
         self.assertTrue(self.docker.speechGroup.isAncestorOf(self.docker.bubbleText))
         self.assertTrue(self.docker.speechGroup.isAncestorOf(self.docker.speechFont))
 
     def test_conditional_controls_and_default_font(self):
         self.assertEqual(self.docker.lockTailLength.text(), "Lock tail length")
         tail_layout = self.docker.tailLengthControls.parentWidget().layout()
-        self.assertLess(tail_layout.indexOf(self.docker.lockTailLength),
-                        tail_layout.indexOf(self.docker.tailLengthControls))
+        length_column = tail_layout.itemAt(0).layout().itemAt(1).layout()
+        self.assertLess(length_column.indexOf(self.docker.lockTailLength),
+                        length_column.indexOf(self.docker.tailLengthControls))
         self.docker.lockTailLength.setChecked(False)
-        self.assertTrue(self.docker.tailLengthControls.isHidden())
-        self.assertTrue(self.docker.tailSpinBox.isHidden())
+        self.assertFalse(self.docker.tailLengthControls.isHidden())
+        self.assertFalse(self.docker.tailSpinBox.isHidden())
+        self.assertFalse(self.docker.tailSlider.isEnabled())
+        self.assertFalse(self.docker.tailSpinBox.isEnabled())
         self.docker.lockTailLength.setChecked(True)
         self.assertFalse(self.docker.tailLengthControls.isHidden())
         self.assertFalse(self.docker.tailSlider.isHidden())
-        self.assertTrue(self.docker.tailSpinBox.isHidden())
+        self.assertFalse(self.docker.tailSpinBox.isHidden())
+        self.assertTrue(self.docker.tailSlider.isEnabled())
+        self.assertTrue(self.docker.tailSpinBox.isEnabled())
         self.assertTrue(self.docker.averageLineLength.isHidden())
         self.docker.autocenter.setChecked(False)
         self.assertFalse(self.docker.averageLineLength.isHidden())
@@ -423,7 +501,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual((self.docker.thoughtSeed, self.docker.shoutSeed), seeds)
         rect, _, body, _, tip, _, _ = self.docker.geometry()
         direction = QPointF(math.cos(self.docker.tailAngle), math.sin(self.docker.tailAngle))
-        anchor = outline_anchor(body, rect.center(), direction)
+        anchor = tail_anchor(body, rect.center(), direction)
         self.assertAlmostEqual(math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y()), 60)
         self.warn.assert_not_called()
 
@@ -456,7 +534,7 @@ class EditorTests(unittest.TestCase):
             self.docker.moveTail(point)
             rect, text_rect, body, path, tip, lines, metrics = self.docker.geometry()
             direction = QPointF(math.cos(self.docker.tailAngle), math.sin(self.docker.tailAngle))
-            anchor = outline_anchor(body, rect.center(), direction)
+            anchor = tail_anchor(body, rect.center(), direction)
             self.assertEqual(self.docker.tailSpinBox.value(), 60)
             self.assertAlmostEqual((tip - anchor).manhattanLength(),
                                    (direction * 60).manhattanLength())
@@ -494,7 +572,7 @@ class EditorTests(unittest.TestCase):
         self.docker.tailSpinBox.setValue(60)
         rect, _, body, _, _, _, _ = self.docker.geometry()
         direction = QPointF(math.cos(self.docker.tailAngle), math.sin(self.docker.tailAngle))
-        anchor = outline_anchor(body, rect.center(), direction)
+        anchor = tail_anchor(body, rect.center(), direction)
         self.docker.moveTail(rect.center() + (anchor - rect.center()) * 0.5)
         self.assertEqual(self.docker.tailSpinBox.value(), 0)
         self.assertIsNotNone(self.docker.preview.tip)
@@ -868,6 +946,7 @@ class EditorTests(unittest.TestCase):
         self.warn.assert_not_called()
 
     def test_new_bubble_button_enters_add_mode_without_reselecting_old_bubble(self):
+        self.docker.bubbleType.setCurrentText("Square")
         document, first, group = self.editTarget()
         group.select()
         self.docker.syncSelection()
@@ -877,6 +956,9 @@ class EditorTests(unittest.TestCase):
         self.assertIsNone(self.docker.editLayerId)
         self.assertFalse(any(shape.isSelected() for shape in first.shapes()))
         self.assertEqual(self.docker.addOnPage.text(), "Add on Page")
+        self.assertEqual(self.docker.bubbleType.currentText(), "Oval")
+        self.assertEqual(json.loads(bytes(document.annotation(
+            self.docker.annotationKey(first))))["style"], "Square")
         self.assertFalse(self.docker.addDestination.isHidden())
         self.assertTrue(self.docker.newBubbleButton.isHidden())
         self.docker.syncSelection()
@@ -1231,7 +1313,14 @@ class EditorTests(unittest.TestCase):
         self.docker.show()
         APP.processEvents()
         scroll = self.docker.widget()
-        self.assertLessEqual(scroll.widget().width(), scroll.viewport().width())
+        for style_index in range(self.docker.bubbleType.count()):
+            self.docker.bubbleType.setCurrentIndex(style_index)
+            for tab_index in range(self.docker.optionsTabs.count()):
+                self.docker.optionsTabs.setCurrentIndex(tab_index)
+                APP.processEvents()
+                with self.subTest(style=self.docker.bubbleType.currentText(),
+                                  tab=self.docker.optionsTabs.tabText(tab_index)):
+                    self.assertLessEqual(scroll.widget().width(), scroll.viewport().width())
 
     def test_text_input_can_be_resized_by_dragging_handle(self):
         handle = self.docker.textResizeHandle

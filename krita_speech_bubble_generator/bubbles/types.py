@@ -46,11 +46,11 @@ class TailParameters:
 
 
 def _rectangular_enclosure(width: float, height: float, padding: float) -> QRectF:
-    return QRectF(0, 0, max(1, width + 2 * padding), max(1, height + 2 * padding))
+    return QRectF(0, 0, max(1, width + 4 * padding), max(1, height + 2 * padding))
 
 
 def _elliptical_enclosure(width: float, height: float, padding: float) -> QRectF:
-    return QRectF(0, 0, max(1, (width + 2 * padding) * math.sqrt(2)),
+    return QRectF(0, 0, max(1, (width + 4 * padding) * math.sqrt(2)),
                   max(1, (height + 2 * padding) * math.sqrt(2)))
 
 
@@ -65,6 +65,9 @@ class BubbleType(ABC):
 
     def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
         return BodyParameters()
+
+    def enclosure_padding(self, settings: BubbleSettings) -> float:
+        return settings.font_size * (0.5 + settings.padding / 100) + settings.outline / 2
 
     @abstractmethod
     def body_path(self, rect: QRectF,
@@ -82,8 +85,15 @@ class BubbleType(ABC):
 class OvalBubble(BubbleType):
     identifier = label = "Oval"
 
+    def enclosure_padding(self, settings: BubbleSettings) -> float:
+        return settings.font_size * settings.padding / 100
+
     def body_rect(self, width: float, height: float, padding: float) -> QRectF:
-        return _elliptical_enclosure(width, height, padding)
+        padded = _rectangular_enclosure(width, height, padding)
+        ratio = min(2, padded.width() / padded.height())
+        # Fit all four text-box corners, without letting short text flatten the oval.
+        body_width = math.hypot(padded.width(), ratio * padded.height())
+        return QRectF(0, 0, body_width, body_width / ratio)
 
     def body_path(self, rect: QRectF,
                   parameters: BodyParameters = BodyParameters()) -> QPainterPath:
@@ -99,7 +109,7 @@ class RoundedBubble(BubbleType):
         return _rectangular_enclosure(width, height, padding)
 
     def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
-        padding = settings.font_size * settings.padding / 100
+        padding = self.enclosure_padding(settings)
         return BodyParameters(corner_radius=min(settings.font_size * 3, padding))
 
     def body_path(self, rect: QRectF,
