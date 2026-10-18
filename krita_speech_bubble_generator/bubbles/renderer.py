@@ -6,10 +6,10 @@ from dataclasses import replace
 import math
 from typing import Callable, List, NamedTuple, Optional, TYPE_CHECKING
 
-from PyQt5.QtCore import QPointF, QRectF
+from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath
 
-from .geometry import bubble_svg, tail_anchor, tail_tip
+from .geometry import bubble_svg, filled_path_centroid, tail_anchor, tail_tip
 from .registry import resolve_bubble
 from .types import BubbleType, TailParameters
 
@@ -71,6 +71,35 @@ def automatic_speech_lines(text: str) -> List[str]:
     return result
 
 
+def _text_bounds(lines: List[str], metrics: QFontMetricsF, font: QFont,
+                 size: int, optical_center: bool = False) -> QRectF:
+    half_width = 0.0
+    top = -metrics.capHeight()
+    bottom = (len(lines) - 1) * size
+    lettering = QPainterPath()
+    lettering.setFillRule(Qt.FillRule.WindingFill)
+    for index, line in enumerate(lines):
+        advance = metrics.horizontalAdvance(line)
+        # Shaped outlines preserve kerning, unlike tightBoundingRect's glyph sums.
+        glyphs = QPainterPath()
+        glyphs.addText(0, 0, font, line)
+        ink = glyphs.boundingRect()
+        half_width = max(half_width, advance / 2,
+                         advance / 2 - ink.left(), ink.right() - advance / 2)
+        top = min(top, index * size + ink.top())
+        bottom = max(bottom, index * size + ink.bottom())
+        if optical_center:
+            glyphs.translate(-advance / 2, index * size)
+            lettering.addPath(glyphs)
+    if optical_center:
+        centroid = filled_path_centroid(lettering)
+        if centroid is not None:
+            # Reserve enough room on both sides of the optical center for all ink.
+            half_height = max(centroid.y() - top, bottom - centroid.y())
+            top, bottom = centroid.y() - half_height, centroid.y() + half_height
+    return QRectF(-half_width, top, half_width * 2, bottom - top)
+
+
 class BubbleRenderer:
     def __init__(self, resolver: Callable[[str, str], BubbleType] = resolve_bubble) -> None:
         self._resolve = resolver
@@ -82,13 +111,12 @@ class BubbleRenderer:
             lines = automatic_speech_lines(settings.text)
         else:
             lines = get_speech_lines(settings.text, settings.line_length)
-        font.setPixelSize(int(size * 1.3))
+        font.setPixelSize(size)
         metrics = QFontMetricsF(font)
-        width = max(metrics.horizontalAdvance(line) for line in lines)
-        height = metrics.capHeight() + (len(lines) - 1) * size
+        bounds = _text_bounds(lines, metrics, font, size, settings.optical_center)
         bubble = self._resolve(settings.style, settings.shout_shape)
-        padding = bubble.enclosure_padding(settings)
-        rect = bubble.body_rect(width, height, padding)
+        width, height = bounds.width(), bounds.height()
+        rect = bubble.enclose_text(width, height, settings)
         text_rect = QRectF((rect.width() - width) / 2,
                           (rect.height() - height) / 2, width, height)
         body = bubble.body_path(rect, bubble.body_parameters(settings))
@@ -112,9 +140,13 @@ class BubbleRenderer:
                 tip = tail_tip(body, rect.center(), settings.tail_angle, 0)
         else:
             view_box = QRectF(0, 0, max(1, rect.width()), max(1, rect.height()))
+        font = QFont(settings.font)
+        font.setPixelSize(settings.font_size)
         svg = bubble_svg(
-            path, lines, text_rect, QFont(settings.font).family(), settings.font_size,
-            metrics.capHeight(), settings.fill, settings.stroke, settings.outline,
+            path, lines, text_rect, font.family(), settings.font_size,
+            -_text_bounds(lines, metrics, font, settings.font_size,
+                          settings.optical_center).top(),
+            settings.fill, settings.stroke, settings.outline,
             settings.text_color, view_box)
         return RenderResult(svg, view_box, tip)
 

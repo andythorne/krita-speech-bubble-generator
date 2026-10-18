@@ -73,8 +73,19 @@ SVG output. Distinct strategies can supply different parameters to shared
 mechanics without copying the entire algorithm. Preserve random draw order when
 refactoring: a saved seed must continue producing the same outline.
 
-Enclosure padding is a bubble policy: non-oval styles keep a text-size-scaled
-minimum margin plus outline clearance, while Oval retains its zero-padding fit.
+Enclosure padding is a bubble policy: at zero, retain only necessary outline
+and shape clearance, not an arbitrary text-size-scaled minimum margin. Measure
+text at the SVG's actual pixel size and include glyph overhangs, accents and
+descenders. Preserve automatic wrapping and baseline spacing.
+Optical vertical centering is opt-in: use the filled glyph-area centroid,
+including holes and overlapping strokes, and expand the enclosure as needed
+without changing wrapping or baseline spacing. Empty lettering retains the
+geometric layout.
+Use `BubbleType.enclose_text` for settings-aware enclosure sizing; the default
+delegates to `body_rect`. Oval's opt-in custom enclosure fits the padded text
+to its smooth quarter-curves, with independent vertical padding and no 2:1
+aspect-ratio cap. Retain the original 2:1 aspect-ratio cap when customisation is
+off. Share the curve parameters between sizing and drawing.
 Tail angles and straight-tail symmetry use the line from the body center to the pointer,
 never the combined body-and-tail bounds or a nearest-edge normal. Intersect that
 ray with the actual body for the tail-length origin; do not snap to supporting

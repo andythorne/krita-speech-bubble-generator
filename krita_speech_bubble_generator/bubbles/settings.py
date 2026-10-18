@@ -32,7 +32,11 @@ class BubbleSettings:
     text_color: str = "#000000"
     outline: int = 3
     padding: int = 150
+    oval_custom: bool = False
+    oval_vertical_padding: int = 150
+    oval_squareness: int = 0
     autocenter: bool = True
+    optical_center: bool = False
     line_length: int = 0
     tail_length: int = 0
     tail_angle: float = math.pi / 4
@@ -60,7 +64,11 @@ class BubbleSettings:
             "text_color": self.text_color,
             "outline": self.outline,
             "padding": self.padding,
+            "oval_custom": self.oval_custom,
+            "oval_vertical_padding": self.oval_vertical_padding,
+            "oval_squareness": self.oval_squareness,
             "autocenter": self.autocenter,
+            "optical_center": self.optical_center,
             "line_length": self.line_length,
             "tail_length": self.tail_length,
             "tail_angle": self.tail_angle,
@@ -97,11 +105,17 @@ LEGACY_DEFAULTS: Dict[str, SettingValue] = {
     "thought_nodes": 16,
     "thought_seed": 0,
     "padding": 150,
+    "oval_custom": False,
+    "oval_vertical_padding": 150,
+    "oval_squareness": 0,
+    "optical_center": False,
 }
 INTEGER_RANGES: Dict[str, Tuple[int, int]] = {
     "font_size": (1, 99),
     "outline": (0, 50),
     "padding": (0, 300),
+    "oval_vertical_padding": (0, 300),
+    "oval_squareness": (0, 100),
     "line_length": (0, 100),
     "tail_curve": (0, 100),
     "thought_size": (25, 400),
@@ -207,7 +221,11 @@ def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
         text_color=strings["text_color"],
         outline=integers["outline"],
         padding=integers["padding"],
+        oval_custom=_boolean(values["oval_custom"], "oval customisation"),
+        oval_vertical_padding=integers["oval_vertical_padding"],
+        oval_squareness=integers["oval_squareness"],
         autocenter=autocenter,
+        optical_center=_boolean(values["optical_center"], "optical centering"),
         line_length=integers["line_length"],
         tail_length=tail_length,
         tail_angle=tail_angle,

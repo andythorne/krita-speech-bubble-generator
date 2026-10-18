@@ -50,13 +50,16 @@ class EditorViewTests(unittest.TestCase):
                 self.view.speechFont, self.view.speechFontSize,
                 self.view.currentFontColorButton, self.view.bubbleText,
                 self.view.textResizeHandle, self.view.autocenter,
+                self.view.opticalCenter,
                 self.view.averageLineLength)),
             (self.view.bubbleTab, (
                 self.view.bubbleType, self.view.bubbleColorButton,
                 self.view.outlineSlider, self.view.outlineSpinBox,
                 self.view.outlineColorButton, self.view.paddingSlider,
                 self.view.paddingSpinBox, self.view.shoutingGroup,
-                self.view.thoughtGroup)),
+                self.view.thoughtGroup, self.view.ovalGroup,
+                self.view.ovalVerticalPaddingSlider, self.view.ovalVerticalPaddingSpinBox,
+                self.view.ovalSquarenessSlider, self.view.ovalSquarenessSpinBox)),
             (self.view.tailTab, (
                 self.view.tailCompass, self.view.lockTailLength,
                 self.view.tailSlider, self.view.tailSpinBox, self.view.thoughtSizeGroup,
@@ -126,7 +129,9 @@ class EditorViewTests(unittest.TestCase):
             line_length=24, shout_shape="Expressive", shout_nodes=37, thought_nodes=29,
             shout_irregularity=85, thought_irregularity=75, shout_seed=1729, thought_seed=2718,
             tail_angle=-2.1, thought_size=275, fill="#123456", stroke="#654321",
-            text_color="#112233", tail_curve=73, tail_curve_direction="Down")
+            text_color="#112233", tail_curve=73, tail_curve_direction="Down",
+            oval_custom=True, oval_vertical_padding=25, oval_squareness=80,
+            optical_center=True)
         result = self.view.load_settings(loaded)
         self.assertEqual(result, loaded)
         self.assertEqual(len(edits), 0)
@@ -141,6 +146,65 @@ class EditorViewTests(unittest.TestCase):
         self.assertEqual(self.view.thoughtNodesSlider.value(), 29)
         self.assertEqual(self.view.tailCurveSlider.value(), 73)
         self.assertEqual(self.view.tailCurveDirection.currentText(), "Down")
+
+    def test_optical_centering_emits_only_its_setting_and_loads_without_edits(self):
+        initial = self.view.initial_settings()
+        self.assertFalse(self.view.opticalCenter.isChecked())
+        edits = QSignalSpy(self.view.edited)
+        self.view.opticalCenter.setChecked(True)
+        enabled = replace(initial, optical_center=True)
+        self.assertEqual(list(edits), [[enabled, ("optical_center",)]])
+        self.view.reflect_settings(initial)
+        self.assertFalse(self.view.opticalCenter.isChecked())
+        self.assertEqual(len(edits), 1)
+        self.view.load_settings(enabled)
+        self.assertTrue(self.view.opticalCenter.isChecked())
+        self.assertEqual(self.view.initial_settings(), enabled)
+        self.assertEqual(len(edits), 1)
+
+    def test_oval_controls_are_opt_in_and_emit_only_the_changed_setting(self):
+        initial = self.view.initial_settings()
+        self.assertFalse(self.view.ovalGroup.isHidden())
+        self.assertFalse(self.view.ovalGroup.isChecked())
+        self.assertFalse(self.view.ovalVerticalPaddingSpinBox.isEnabled())
+        self.assertFalse(self.view.ovalSquarenessSpinBox.isEnabled())
+        edits = QSignalSpy(self.view.edited)
+        self.view.ovalGroup.setChecked(True)
+        enabled = replace(initial, oval_custom=True)
+        self.assertEqual(list(edits), [[enabled, ("oval_custom",)]])
+        self.assertTrue(self.view.ovalVerticalPaddingSpinBox.isEnabled())
+        self.assertEqual(self.view.paddingGroup.title(), "Horizontal padding")
+        self.view.ovalVerticalPaddingSlider.setValue(20)
+        padded = replace(enabled, oval_vertical_padding=20)
+        self.assertEqual(edits[1], [padded, ("oval_vertical_padding",)])
+        self.assertEqual(self.view.ovalVerticalPaddingSpinBox.value(), 20)
+        self.view.ovalSquarenessSpinBox.setValue(65)
+        squared = replace(padded, oval_squareness=65)
+        self.assertEqual(edits[2], [squared, ("oval_squareness",)])
+        self.assertEqual(self.view.ovalSquarenessSlider.value(), 65)
+        self.view.ovalGroup.setChecked(False)
+        self.assertEqual(edits[3], [replace(squared, oval_custom=False), ("oval_custom",)])
+        self.assertEqual(self.view.paddingGroup.title(), "Padding")
+        self.assertFalse(self.view.ovalSquarenessSpinBox.isEnabled())
+
+    def test_oval_options_survive_style_switches_and_programmatic_reflection(self):
+        initial = replace(self.view.initial_settings(), oval_custom=True,
+                          oval_vertical_padding=25, oval_squareness=80)
+        self.view.load_settings(initial)
+        for style in BUBBLE_TYPES:
+            self.view.bubbleType.setCurrentText(style)
+            self.assertEqual(self.view.ovalGroup.isHidden(),
+                             not BUBBLE_TYPES[style].capabilities.oval)
+            self.assertEqual(self.view.initial_settings(), replace(initial, style=style))
+            self.assertEqual(self.view.paddingGroup.title(),
+                             "Horizontal padding" if style == "Oval" else "Padding")
+        edits = QSignalSpy(self.view.edited)
+        reflected = replace(initial, oval_vertical_padding=0, oval_squareness=50)
+        self.view.reflect_settings(reflected)
+        self.assertEqual(self.view.initial_settings(), reflected)
+        self.assertEqual(len(edits), 0)
+        self.assertFalse(self.view.ovalGroup.isHidden())
+        self.assertEqual(self.view.paddingGroup.title(), "Horizontal padding")
 
     def test_tail_curve_controls_emit_snapshots_without_changing_length_or_seeds(self):
         initial = replace(

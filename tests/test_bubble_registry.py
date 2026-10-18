@@ -35,7 +35,8 @@ class BubbleRegistryTests(unittest.TestCase):
             self.assertEqual(bubble.label, key)
             self.assertEqual(bubble.capabilities,
                              BubbleCapabilities(thought=key == "Thought",
-                                                shouting=key == "Shouting"))
+                                                shouting=key == "Shouting",
+                                                oval=key == "Oval"))
         for key, algorithm in SHOUTING_ALGORITHMS.items():
             self.assertEqual(algorithm.identifier, key)
             self.assertEqual(algorithm.label, key)

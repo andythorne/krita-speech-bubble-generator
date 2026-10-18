@@ -25,6 +25,8 @@ class SettingsTests(unittest.TestCase):
             style="Shouting", text="Changed", font="Serif", font_size=20,
             fill="#123456", stroke="#654321", text_color="#112233",
             outline=5, padding=120, autocenter=False, line_length=30,
+            optical_center=True,
+            oval_custom=True, oval_vertical_padding=35, oval_squareness=65,
             tail_length=50, tail_angle=-1.5, lock_tail=False, thought_size=125,
             tail_curve=73, tail_curve_direction="Down",
             shout_irregularity=70, shout_shape="Expressive", shout_nodes=32,
@@ -54,7 +56,8 @@ class SettingsTests(unittest.TestCase):
             font="Serif", tail_length=80, tail_angle=-2.8,
             lock_tail=False, shout_shape="Expressive", shout_seed=1729,
             thought_seed=2718, shout_nodes=37, thought_nodes=29,
-            tail_curve=73, tail_curve_direction="Down")
+            tail_curve=73, tail_curve_direction="Down", oval_custom=True,
+            oval_vertical_padding=35, oval_squareness=65, optical_center=True)
         baseline = QTransform(0.8, 0.2, -0.1, 1.5, -7, 12)
         encoded = encode_record(settings, baseline)
         record = decode_record(encoded)
@@ -68,6 +71,8 @@ class SettingsTests(unittest.TestCase):
             "lock_tail", "thought_size", "shout_irregularity", "shout_seed",
             "shout_shape", "shout_nodes", "thought_irregularity", "thought_nodes",
             "thought_seed", "padding", "tail_curve", "tail_curve_direction",
+            "oval_custom", "oval_vertical_padding", "oval_squareness",
+            "optical_center",
         ):
             del values[field]
         old = deepcopy(values)
@@ -82,6 +87,10 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(normalized["lock_tail"])
         self.assertEqual(normalized["tail_curve"], 0)
         self.assertEqual(normalized["tail_curve_direction"], "Up")
+        self.assertFalse(normalized["oval_custom"])
+        self.assertEqual(normalized["oval_vertical_padding"], 150)
+        self.assertEqual(normalized["oval_squareness"], 0)
+        self.assertFalse(normalized["optical_center"])
         fresh = settings_from_dict({})
         self.assertEqual(fresh.shout_irregularity, 50)
         self.assertEqual(fresh.thought_irregularity, 50)
@@ -166,7 +175,7 @@ class SettingsTests(unittest.TestCase):
             with self.subTest(key=key):
                 with self.assertRaisesRegex(SettingsError, key):
                     validate_settings(self.record(**{key: "not-a-color"}))
-        for key in ("autocenter", "lock_tail"):
+        for key in ("autocenter", "lock_tail", "oval_custom", "optical_center"):
             for value in (0, 1, "true", None):
                 with self.subTest(key=key, value=value):
                     with self.assertRaises(SettingsError):

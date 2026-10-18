@@ -3,12 +3,46 @@ import random
 from typing import Iterable, List, Optional, Tuple
 from xml.sax.saxutils import escape, quoteattr
 
-from PyQt5.QtCore import QPointF, QRectF
-from PyQt5.QtGui import QPainterPath, QTransform
+from PyQt5.QtCore import QPointF, QRectF, Qt
+from PyQt5.QtGui import QPainterPath, QPolygonF, QTransform
 
 
 MIN_NODES = 8
 MAX_NODES = 64
+
+
+def filled_path_centroid(path: QPainterPath) -> Optional[QPointF]:
+    """Find the center of filled area, accounting for holes and overlaps."""
+    scale = 8.0
+    polygons = QTransform().scale(scale, scale).map(path).simplified().toSubpathPolygons()
+    contours: List[Tuple[QPolygonF, float, QPointF, QRectF]] = []
+    for polygon in polygons:
+        twice_area = polygon_x = polygon_y = 0.0
+        for index in range(len(polygon) - 1):
+            start, end = polygon[index], polygon[index + 1]
+            cross = start.x() * end.y() - end.x() * start.y()
+            twice_area += cross
+            polygon_x += (start.x() + end.x()) * cross
+            polygon_y += (start.y() + end.y()) * cross
+        if abs(twice_area) > 1e-9:
+            contours.append((polygon, abs(twice_area),
+                             QPointF(polygon_x / (3 * twice_area),
+                                     polygon_y / (3 * twice_area)),
+                             polygon.boundingRect()))
+    weight = moment_x = moment_y = 0.0
+    for polygon, area, centroid, bounds in contours:
+        # Qt's simplified paths use odd-even fill, not consistent contour winding.
+        depth = sum(
+            1 for parent, parent_area, _, parent_bounds in contours
+            if parent_area > area and parent_bounds.contains(bounds)
+            and parent.containsPoint(polygon[0], Qt.FillRule.OddEvenFill))
+        area_weight = area if depth % 2 == 0 else -area
+        weight += area_weight
+        moment_x += area_weight * centroid.x()
+        moment_y += area_weight * centroid.y()
+    if weight == 0:
+        return None
+    return QPointF(moment_x / weight / scale, moment_y / weight / scale)
 
 
 def validate_nodes(nodes: Optional[int]) -> None:
@@ -196,11 +230,11 @@ def path_data(path: QPainterPath) -> str:
 
 
 def bubble_svg(path: QPainterPath, lines: Iterable[str], text_rect: QRectF,
-               font_family: str, font_size: float, cap_height: float,
+               font_family: str, font_size: float, baseline_offset: float,
                fill: str, stroke: str, stroke_width: float, text_color: str,
                view_box: QRectF) -> str:
     text: List[str] = []
-    baseline = text_rect.top() + cap_height
+    baseline = text_rect.top() + baseline_offset
     for line in lines:
         text.append(
             '<text x="{}" y="{}" font-family={} font-size="{}" '

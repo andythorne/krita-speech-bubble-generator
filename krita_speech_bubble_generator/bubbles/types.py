@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 class BubbleCapabilities:
     thought: bool = False
     shouting: bool = False
+    oval: bool = False
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,7 @@ class BodyParameters:
     irregularity: int = 50
     seed: int = 0
     nodes: Optional[int] = None
+    squareness: int = 0
 
     def __post_init__(self) -> None:
         validate_nodes(self.nodes)
@@ -69,7 +71,11 @@ class BubbleType(ABC):
         return BodyParameters()
 
     def enclosure_padding(self, settings: BubbleSettings) -> float:
-        return settings.font_size * (0.5 + settings.padding / 100) + settings.outline / 2
+        return settings.font_size * settings.padding / 100 + settings.outline / 2
+
+    def enclose_text(self, width: float, height: float,
+                     settings: BubbleSettings) -> QRectF:
+        return self.body_rect(width, height, self.enclosure_padding(settings))
 
     @abstractmethod
     def body_path(self, rect: QRectF,
@@ -87,9 +93,7 @@ class BubbleType(ABC):
 
 class OvalBubble(BubbleType):
     identifier = label = "Oval"
-
-    def enclosure_padding(self, settings: BubbleSettings) -> float:
-        return settings.font_size * settings.padding / 100
+    capabilities = BubbleCapabilities(oval=True)
 
     def body_rect(self, width: float, height: float, padding: float) -> QRectF:
         padded = _rectangular_enclosure(width, height, padding)
@@ -98,11 +102,41 @@ class OvalBubble(BubbleType):
         body_width = math.hypot(padded.width(), ratio * padded.height())
         return QRectF(0, 0, body_width, body_width / ratio)
 
+    @staticmethod
+    def _curve_control(squareness: int) -> float:
+        circle = 4 * (math.sqrt(2) - 1) / 3
+        return circle + (1 - circle) * squareness / 100
+
+    def enclose_text(self, width: float, height: float,
+                     settings: BubbleSettings) -> QRectF:
+        if not settings.oval_custom:
+            return super().enclose_text(width, height, settings)
+        horizontal = self.enclosure_padding(settings)
+        vertical = (settings.font_size * settings.oval_vertical_padding / 100
+                    + settings.outline / 2)
+        # Each quarter-curve's midpoint fits one corner of the padded text box.
+        corner = 0.5 + 0.375 * self._curve_control(settings.oval_squareness)
+        return QRectF(0, 0, max(1, (width + 4 * horizontal) / corner),
+                      max(1, (height + 2 * vertical) / corner))
+
+    def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
+        return BodyParameters(
+            squareness=settings.oval_squareness if settings.oval_custom else 0)
+
     def body_path(self, rect: QRectF,
                   parameters: BodyParameters = BodyParameters()) -> QPainterPath:
         path = QPainterPath()
-        path.addEllipse(rect)
-        return path
+        if parameters.squareness == 0:
+            path.addEllipse(rect)
+            return path
+        control = self._curve_control(parameters.squareness)
+        path.moveTo(1, 0)
+        path.cubicTo(1, control, control, 1, 0, 1)
+        path.cubicTo(-control, 1, -1, control, -1, 0)
+        path.cubicTo(-1, -control, -control, -1, 0, -1)
+        path.cubicTo(control, -1, 1, -control, 1, 0)
+        path.closeSubpath()
+        return ellipse_transform(rect).map(path)
 
 
 class RoundedBubble(BubbleType):
@@ -111,9 +145,26 @@ class RoundedBubble(BubbleType):
     def body_rect(self, width: float, height: float, padding: float) -> QRectF:
         return _rectangular_enclosure(width, height, padding)
 
-    def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
+    def _corner_radius(self, settings: BubbleSettings) -> float:
+        return min(settings.font_size * 3,
+                   settings.font_size * 0.5 + self.enclosure_padding(settings))
+
+    def enclose_text(self, width: float, height: float,
+                     settings: BubbleSettings) -> QRectF:
         padding = self.enclosure_padding(settings)
-        return BodyParameters(corner_radius=min(settings.font_size * 3, padding))
+        radius = self._corner_radius(settings)
+        horizontal = max(0, radius - 2 * padding)
+        vertical = max(0, radius - padding)
+        inner_radius = max(0, radius - settings.outline / 2)
+        extra = 0.0
+        if horizontal ** 2 + vertical ** 2 > inner_radius ** 2:
+            # Fit text corners inside the rounded outline's inner edge.
+            extra = (horizontal + vertical - math.sqrt(
+                2 * inner_radius ** 2 - (horizontal - vertical) ** 2)) / 2
+        return self.body_rect(width + 2 * extra, height + 2 * extra, padding)
+
+    def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
+        return BodyParameters(corner_radius=self._corner_radius(settings))
 
     def body_path(self, rect: QRectF,
                   parameters: BodyParameters = BodyParameters()) -> QPainterPath:

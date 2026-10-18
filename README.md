@@ -14,9 +14,11 @@ dialogue, choose a style, and drag the tail into place.
 | Adjustable nodes | Set 8-64 nodes for more or fewer shouting spikes or thought-cloud lobes. Each bubble keeps its node counts. |
 | Tail positioning and curves | Choose one of eight compass directions or drag freely in the preview, without snapping to corners or spikes. Keep a straight tail or adjust its curve amount and Up/Down direction, with an optional length lock. Thought trails can curve too. |
 | Expressive shapes | Adjust thought-cloud irregularity, thought-trail blob size, and shouting-spike spacing with subtle height and valley-depth variation. Your pattern stays stable while you edit. |
-| Text and appearance | Choose fonts, text size, fill and outline colours, with the original plugin's automatic wrapping, text sizing and tight line spacing. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
+| Text and appearance | Choose fonts, text size, fill and outline colours, with the original plugin's automatic wrapping and tight line spacing. Bubble sizing uses the actual rendered text size, including accents, descenders and overhanging letters. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
+| Optical text centering | Optionally balance the visual weight of the lettering vertically, so blocks with longer upper lines do not look top-heavy. |
 | Organised controls | Use the Text, Bubble and Tail tabs to find related options, or Import for old bubbles and its limitations. The preview and page actions are shared across all tabs. |
-| Bubble padding | Adjust the space around the text, with horizontal padding changing twice as strongly as vertical padding. Non-oval styles retain a minimum margin even at 0%. Oval bubbles keep a fuller outline, no more than twice as wide as they are tall. |
+| Bubble padding | Adjust the space around the text, with horizontal padding changing twice as strongly as vertical padding. At 0%, only the clearance needed for the outline and shape remains, without a built-in text-size margin. |
+| Customisable ovals | Enable independent horizontal/vertical padding for flatter ovals around wide text, and adjust Squareness from an ellipse to a softly squared outline. Leave customisation off for the original fuller proportions. |
 | Remembered options | Dialogue, font, colours, padding, layout, tail and style-specific options, canvas-background preference and layer destination are remembered between sessions. Each new bubble still defaults to Oval. |
 | Live editing | Select a saved bubble to edit its text and appearance directly from the docker. Changes appear on the canvas after a short pause. |
 | Canvas-aware preview | See the surrounding artwork while editing, so you can point the tail at the right character. |
@@ -56,8 +58,9 @@ conversion is needed. For bubbles made with the original upstream plugin, use
    Open **Bubble** to choose a style, colours, outline and **Padding**.
    Padding controls the space around the text: 100% adds one text-size
    unit above and below, and two on each side. Reducing it tightens the horizontal
-   space more quickly. Non-oval styles keep a minimum text margin at 0%, including
-   room for the outline; Oval keeps its existing 0% fit.
+   space more quickly. At 0%, no optional margin is added: the bubble keeps only
+   the clearance needed to contain the text within its shape and outline.
+   Curved outlines can still leave some space beside the text.
 3. In the **Tail** tab, set a length above zero, then click a compass direction
    or drag the blue preview handle to aim it.
    Leave **Lock tail length** on to change direction only, or turn it off to
@@ -79,6 +82,29 @@ For example, `Rogudator's speech bubble generator!` wraps as `Rogudator's`,
 `speech bubble`, then `generator!`, regardless of the font or text size.
 Explicit line breaks and blank lines are retained. Turn automatic centering off
 to use **Characters per line**, or set that to zero to keep only your own breaks.
+
+Enable **Optical vertical centering** in the **Text** tab when a geometrically
+centered block still looks too high or low. It balances the visible lettering:
+longer or heavier upper lines move the block downward, and heavier lower lines
+move it upward. The bubble can grow taller to keep all lettering safely inside.
+Wrapping, baseline spacing and the tail-length lock stay unchanged. This option
+is saved with each bubble and remembered between sessions; it is off by default.
+Leave it off for geometric centering with equal top and bottom layout gaps.
+
+For a tighter oval around short, wide dialogue, select **Oval** in the **Bubble**
+tab and enable **Customise oval**. The **Padding** control becomes **Horizontal
+padding**; use **Vertical padding** independently to reduce the empty space above
+and below the text. 100% adds twice the text size on each horizontal side, or
+once the text size above and below. Customised ovals can be more than twice as
+wide as they are tall.
+
+Use **Squareness** to make the corners fuller and fit the text more closely:
+0% is a true ellipse, and 100% is a softly squared oval with smooth corners.
+Text wrapping and the tail-length lock stay unchanged. These options are saved
+with each bubble and remembered between sessions. Turn **Customise oval** off
+to return to the original proportions and linked padding, without losing the
+custom vertical-padding and squareness values. Oval customisation stays off for
+existing bubbles until you enable it.
 
 The blue handle is only an editing aid; it does not appear in your artwork.
 The **Tail** controls have two columns: position on the left, and the length lock
@@ -126,6 +152,10 @@ your changes always update the bubble automatically after a short pause.
 The main button becomes
 **Update on Page**, so it updates the selected bubble rather than adding another.
 There is no separate manual-editing mode or live-update switch.
+
+Older bubbles may fit more tightly after an edit because sizing now measures
+the rendered text size and no longer adds a built-in minimum margin. Font sizes
+and automatic line wrapping are unchanged.
 
 **Canvas background** shows the nearby artwork in the preview while editing.
 It follows the bubble when you move, rotate or scale it on the canvas. Use

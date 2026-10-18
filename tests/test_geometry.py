@@ -4,11 +4,12 @@ import math
 import unittest
 from unittest.mock import patch
 
-from PyQt5.QtCore import QPointF, QRectF
+from PyQt5.QtCore import QPointF, QRectF, Qt
+from PyQt5.QtGui import QPainterPath, QTransform
 
 from fake_krita import APP
 from krita_speech_bubble_generator.bubbles.geometry import (
-    body_path, bubble_path, path_data, tail_anchor, tail_tip,
+    body_path, bubble_path, filled_path_centroid, path_data, tail_anchor, tail_tip,
 )
 from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 
@@ -18,6 +19,39 @@ SHOUTING_SHAPES = tuple(SHOUTING_ALGORITHMS)
 
 
 class GeometryTests(unittest.TestCase):
+    def test_filled_centroid_accounts_for_holes_overlaps_and_reflections(self):
+        outer = QPainterPath()
+        outer.addRect(QRectF(0, 0, 20, 10))
+        hole = QPainterPath()
+        hole.addRect(QRectF(12, 1, 6, 4))
+        cutout = outer.subtracted(hole)
+        expected_cutout = QPointF((200 * 10 - 24 * 15) / 176,
+                                  (200 * 5 - 24 * 3) / 176)
+        nested = QPainterPath(cutout)
+        nested.addRect(QRectF(14, 2, 2, 2))
+        expected_nested = QPointF((200 * 10 - 24 * 15 + 4 * 15) / 180,
+                                  (200 * 5 - 24 * 3 + 4 * 3) / 180)
+        overlapping = QPainterPath()
+        overlapping.setFillRule(Qt.WindingFill)
+        overlapping.addRect(QRectF(0, 0, 10, 10))
+        overlapping.addRect(QRectF(5, 0, 10, 20))
+        for path, expected in ((outer, QPointF(10, 5)), (cutout, expected_cutout),
+                               (nested, expected_nested),
+                               (overlapping, QPointF(8.5, 9))):
+            for transform in (QTransform(), QTransform().translate(33, -2).scale(-2, 3)):
+                with self.subTest(path=path, transform=transform):
+                    actual = filled_path_centroid(transform.map(path))
+                    self.assertIsNotNone(actual)
+                    self.assertAlmostEqual(actual.x(), transform.map(expected).x())
+                    self.assertAlmostEqual(actual.y(), transform.map(expected).y())
+
+    def test_empty_and_unfilled_paths_have_no_optical_centroid(self):
+        path = QPainterPath()
+        self.assertIsNone(filled_path_centroid(path))
+        path.moveTo(0, 0)
+        path.lineTo(30, 20)
+        self.assertIsNone(filled_path_centroid(path))
+
     @staticmethod
     def shouting_vertices(path, rect):
         def point(index):

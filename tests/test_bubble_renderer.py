@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtCore import QPointF, QRectF
-from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath
+from PyQt5.QtCore import QByteArray, QPointF, QRectF
+from PyQt5.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainterPath
+from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 
 from krita_speech_bubble_generator.bubbles.geometry import (
@@ -24,6 +25,36 @@ from krita_speech_bubble_generator.bubbles.types import BubbleType
 
 APP = QApplication.instance() or QApplication([])
 SVG = "{http://www.w3.org/2000/svg}"
+
+
+def glyph_bounds(font, text):
+    path = QPainterPath()
+    path.addText(0, 0, font, text)
+    return path.boundingRect()
+
+
+def rendered_text_centroid_y(rendered):
+    scale = 3
+    box = rendered.view_box
+    image = QImage(math.ceil(box.width() * scale), math.ceil(box.height() * scale),
+                   QImage.Format_RGBA8888)
+    image.fill(QColor("white"))
+    painter = QPainter(image)
+    painter.scale(scale, scale)
+    painter.translate(-box.left(), -box.top())
+    QSvgRenderer(QByteArray(rendered.svg.encode())).render(painter, box)
+    painter.end()
+    pixels = image.constBits().asstring(image.sizeInBytes())
+    weight = moment = 0
+    for y in range(image.height()):
+        row = pixels[y * image.bytesPerLine():(y + 1) * image.bytesPerLine()]
+        ink = sum(max(0, row[x] - max(row[x + 1], row[x + 2]))
+                  for x in range(0, image.width() * 4, 4))
+        weight += ink
+        moment += ink * (y + 0.5)
+    if weight == 0:
+        raise AssertionError("Expected red text in the rendered SVG")
+    return moment / weight / scale + box.top()
 
 
 class BubbleRendererTests(unittest.TestCase):
@@ -69,8 +100,7 @@ class BubbleRendererTests(unittest.TestCase):
                 thought = BUBBLE_TYPES[style].capabilities.thought
                 body = body_path(
                     result.body_rect, style,
-                    min(settings.font_size * 3,
-                        BUBBLE_TYPES[style].enclosure_padding(settings)),
+                    BUBBLE_TYPES[style].body_parameters(settings).corner_radius,
                     settings.thought_irregularity if thought else settings.shout_irregularity,
                     settings.thought_seed if thought else settings.shout_seed,
                     settings.shout_shape,
@@ -84,19 +114,27 @@ class BubbleRendererTests(unittest.TestCase):
                     settings.thought_irregularity, settings.thought_seed))
                 self.assertTrue(result.body_rect.contains(result.text_rect))
 
-    def test_original_text_measurements_and_line_spacing_in_preview_and_export(self):
+    def test_measurements_match_rendered_font_size_and_preserve_line_spacing(self):
         for size in (1, 14, 18, 35, 99):
             with self.subTest(size=size):
                 settings = replace(self.settings, text="AVATAR To Wa\n\nThird line",
                                    font_size=size, line_length=0)
                 font = QFont(settings.font)
-                font.setPixelSize(int(size * 1.3))
+                font.setPixelSize(size)
                 metrics = QFontMetricsF(font)
                 geometry = self.renderer.geometry(settings)
                 self.assertEqual(geometry.text_rect.width(), max(
-                    metrics.horizontalAdvance(line) for line in geometry.lines))
-                self.assertEqual(geometry.text_rect.height(),
-                                 metrics.capHeight() + 2 * size)
+                    max(metrics.horizontalAdvance(line),
+                        metrics.horizontalAdvance(line) - 2 * glyph_bounds(font, line).left(),
+                        2 * glyph_bounds(font, line).right() - metrics.horizontalAdvance(line))
+                    for line in geometry.lines))
+                top = min(-metrics.capHeight(), min(
+                    index * size + glyph_bounds(font, line).top()
+                    for index, line in enumerate(geometry.lines)))
+                bottom = max(2 * size, max(
+                    index * size + glyph_bounds(font, line).bottom()
+                    for index, line in enumerate(geometry.lines)))
+                self.assertEqual(geometry.text_rect.height(), bottom - top)
                 rendered_text = []
                 for preview in (False, True):
                     root = ET.fromstring(self.renderer.render(settings, preview).svg)
@@ -106,8 +144,7 @@ class BubbleRendererTests(unittest.TestCase):
                     for index, node in enumerate(nodes):
                         self.assertEqual(float(node.attrib["font-size"]), size)
                         self.assertEqual(float(node.attrib["y"]),
-                                         geometry.text_rect.top() +
-                                         metrics.capHeight() + index * size)
+                                         geometry.text_rect.top() - top + index * size)
                         self.assertNotIn("letter-spacing", node.attrib)
                         self.assertNotIn("word-spacing", node.attrib)
                     rendered_text.append([node.attrib for node in nodes])
@@ -193,15 +230,104 @@ class BubbleRendererTests(unittest.TestCase):
                 self.assertEqual(large.text_rect.size(), small.text_rect.size())
                 self.assertEqual(large.lines, small.lines)
 
-    def test_non_oval_zero_padding_retains_spacing_clear_of_the_outline(self):
-        for style in ("Rounded", "Square", "Thought", "Shouting"):
+    def test_custom_oval_padding_is_independent_and_removes_the_aspect_ratio_cap(self):
+        settings = replace(
+            self.settings, text="Damn Kara looks\nso hot now...", line_length=0)
+        original = self.renderer.geometry(settings)
+        custom = replace(settings, oval_custom=True)
+        generous = self.renderer.geometry(custom)
+        tight = self.renderer.geometry(replace(custom, oval_vertical_padding=0))
+        wider = self.renderer.geometry(replace(custom, padding=250))
+        self.assertEqual(generous.body_rect.width(), tight.body_rect.width())
+        self.assertEqual(generous.body_rect.height(), wider.body_rect.height())
+        self.assertGreater(wider.body_rect.width(), generous.body_rect.width())
+        self.assertLess(tight.body_rect.height(), generous.body_rect.height())
+        self.assertLess(tight.body_rect.height(), original.body_rect.height())
+        self.assertGreater(tight.body_rect.width() / tight.body_rect.height(), 2)
+        for geometry in (generous, tight, wider):
+            self.assertEqual(geometry.lines, original.lines)
+            self.assertEqual(geometry.text_rect.size(), original.text_rect.size())
+
+    def test_squared_oval_fits_text_with_less_extra_space_and_smooth_closed_curves(self):
+        settings = replace(self.settings, oval_custom=True, oval_vertical_padding=0)
+        ellipse = self.renderer.geometry(settings)
+        squared = self.renderer.geometry(replace(settings, oval_squareness=100))
+        self.assertLess(squared.body_rect.width(), ellipse.body_rect.width())
+        self.assertLess(squared.body_rect.height(), ellipse.body_rect.height())
+        self.assertEqual(squared.text_rect.size(), ellipse.text_rect.size())
+        for index in range(1, squared.body.elementCount(), 3):
+            self.assertTrue(squared.body.elementAt(index).isCurveTo())
+        self.assertEqual(squared.body.boundingRect(), squared.body_rect)
+        self.assertTrue(path_data(squared.body).endswith("Z"))
+
+    def test_custom_oval_encloses_text_for_all_shapes_paddings_and_aspect_ratios(self):
+        for text in ("Hi", "A very long unwrapped line of dialogue",
+                     "One\nTwo\nThree\nFour\nFive", ""):
+            for horizontal, vertical in ((0, 0), (150, 0), (0, 150), (300, 300)):
+                for squareness in (0, 25, 50, 75, 100):
+                    with self.subTest(text=text, horizontal=horizontal,
+                                      vertical=vertical, squareness=squareness):
+                        settings = replace(
+                            self.settings, text=text, line_length=0, oval_custom=True,
+                            padding=horizontal, oval_vertical_padding=vertical,
+                            oval_squareness=squareness)
+                        geometry = self.renderer.geometry(settings)
+                        inset = geometry.text_rect.adjusted(0.01, 0.01, -0.01, -0.01)
+                        if geometry.text_rect.width() == 0:
+                            inset.setLeft(geometry.text_rect.center().x())
+                            inset.setRight(geometry.text_rect.center().x())
+                        for corner in (inset.topLeft(), inset.topRight(),
+                                       inset.bottomLeft(), inset.bottomRight()):
+                            self.assertTrue(geometry.body.contains(corner))
+
+    def test_custom_oval_options_do_not_affect_other_styles_or_disabled_ovals(self):
+        for style in BUBBLE_TYPES:
+            settings = replace(self.settings, style=style)
+            original = self.renderer.geometry(settings)
+            changed = replace(settings, oval_vertical_padding=0, oval_squareness=100)
+            if not BUBBLE_TYPES[style].capabilities.oval:
+                changed = replace(changed, oval_custom=True)
+            geometry = self.renderer.geometry(changed)
+            self.assertEqual(geometry.body_rect, original.body_rect)
+            self.assertEqual(geometry.body, original.body)
+            self.assertEqual(geometry.text_rect, original.text_rect)
+
+    def test_custom_oval_uses_actual_outline_for_locked_and_dragged_tails(self):
+        for squareness in (0, 50, 100):
+            for locked in (False, True):
+                settings = replace(
+                    self.settings, text="Wide dialogue", line_length=0, oval_custom=True,
+                    oval_vertical_padding=0, oval_squareness=squareness,
+                    tail_length=43, lock_tail=locked, tail_curve=70)
+                geometry = self.renderer.geometry(settings)
+                for degrees in range(0, 360, 45):
+                    with self.subTest(squareness=squareness, locked=locked, degrees=degrees):
+                        angle = math.radians(degrees)
+                        direction = QPointF(math.cos(angle), math.sin(angle))
+                        anchor = tail_anchor(geometry.body, geometry.body_rect.center(), direction)
+                        moved = self.renderer.move_tail(settings, anchor + direction * 70)
+                        result = self.renderer.geometry(moved)
+                        self.assertEqual(moved.tail_length, 43 if locked else 70)
+                        self.assertEqual(result.body, geometry.body)
+                        self.assertEqual(result.text_rect, geometry.text_rect)
+                        self.assertAlmostEqual(
+                            math.hypot(result.tip.x() - anchor.x(), result.tip.y() - anchor.y()),
+                            moved.tail_length)
+                        self.assertTrue(result.path.contains(geometry.body_rect.center()))
+                        preview = ET.fromstring(self.renderer.render(moved, preview=True).svg)
+                        exported = ET.fromstring(self.renderer.render(moved).svg)
+                        self.assertEqual(preview.find(".//" + SVG + "path").attrib,
+                                         exported.find(".//" + SVG + "path").attrib)
+
+    def test_zero_padding_retains_only_necessary_outline_and_shape_clearance(self):
+        for style in BUBBLE_TYPES:
             for size, outline in ((1, 0), (14, 3), (35, 50)):
                 with self.subTest(style=style, size=size, outline=outline):
                     settings = replace(
                         self.settings, style=style, text="Zero padding\nStill readable",
                         padding=0, font_size=size, outline=outline)
                     geometry = self.renderer.geometry(settings)
-                    clearance = size * 0.5 + outline / 2
+                    clearance = outline / 2
                     inset = geometry.text_rect.adjusted(0.01, 0.01, -0.01, -0.01)
                     for corner in (inset.topLeft(), inset.topRight(),
                                    inset.bottomLeft(), inset.bottomRight()):
@@ -212,6 +338,107 @@ class BubbleRendererTests(unittest.TestCase):
                     if style == "Rounded":
                         self.assertGreater(BUBBLE_TYPES[style].body_parameters(
                             settings).corner_radius, 0)
+
+    def test_zero_square_padding_has_no_hidden_margin_or_font_size_multiplier(self):
+        for size in (8, 14, 35, 99):
+            settings = replace(self.settings, style="Square", text="AVATAR To Wa",
+                               line_length=0, font_size=size, padding=0, outline=0)
+            geometry = self.renderer.geometry(settings)
+            font = QFont(settings.font)
+            font.setPixelSize(size)
+            self.assertEqual(geometry.text_rect.width(),
+                             QFontMetricsF(font).horizontalAdvance(settings.text))
+            self.assertEqual(geometry.body_rect, geometry.text_rect)
+            outlined = self.renderer.geometry(replace(settings, outline=6))
+            self.assertAlmostEqual(outlined.body_rect.width() - geometry.body_rect.width(), 12)
+            self.assertAlmostEqual(outlined.body_rect.height() - geometry.body_rect.height(), 6)
+
+    def test_tight_fit_contains_actual_glyph_ink_including_accents_and_descenders(self):
+        for style in BUBBLE_TYPES:
+            for text in ("j", "\u00c1\u00c9gj", "First line\njazz glyphs\n\u00c9lan"):
+                for custom in (False, True):
+                    with self.subTest(style=style, text=text, custom=custom):
+                        settings = replace(
+                            self.settings, style=style, text=text, line_length=0,
+                            font="DejaVu Serif", padding=0, outline=3,
+                            oval_custom=custom, oval_vertical_padding=0, oval_squareness=65)
+                        geometry = self.renderer.geometry(settings)
+                        root = ET.fromstring(self.renderer.render(settings).svg)
+                        font = QFont(settings.font)
+                        font.setPixelSize(settings.font_size)
+                        for line, node in zip(geometry.lines, root.iter(SVG + "text")):
+                            ink = glyph_bounds(font, line)
+                            origin = QPointF(
+                                geometry.body_rect.center().x()
+                                - geometry.metrics.horizontalAdvance(line) / 2,
+                                float(node.attrib["y"]))
+                            ink.translate(origin)
+                            self.assertTrue(geometry.text_rect.adjusted(
+                                -1e-6, -1e-6, 1e-6, 1e-6).contains(ink))
+                            inset = ink.adjusted(0.01, 0.01, -0.01, -0.01)
+                            for corner in (inset.topLeft(), inset.topRight(),
+                                           inset.bottomLeft(), inset.bottomRight()):
+                                self.assertTrue(geometry.body.contains(corner))
+
+    def test_optical_centering_balances_rendered_ink_in_both_directions(self):
+        top_heavy = ("She used to be a chubby\nlittle girl when\n"
+                     "we were at school\ntogether!")
+        for font in ("DejaVu Sans", "DejaVu Serif"):
+            for text in (top_heavy, "\n".join(reversed(top_heavy.split("\n")))):
+                with self.subTest(font=font, text=text):
+                    settings = replace(self.settings, text=text, line_length=0,
+                                       font=font, text_color="#ff0000")
+                    geometric = self.renderer.geometry(settings)
+                    before = rendered_text_centroid_y(self.renderer.render(settings, preview=True))
+                    enabled = replace(settings, optical_center=True)
+                    optical = self.renderer.geometry(enabled)
+                    after = rendered_text_centroid_y(self.renderer.render(enabled, preview=True))
+                    self.assertGreater(abs(before - geometric.body_rect.center().y()), 2)
+                    self.assertAlmostEqual(after, optical.body_rect.center().y(), delta=0.35)
+                    self.assertEqual(optical.lines, geometric.lines)
+                    self.assertEqual(optical.text_rect.width(), geometric.text_rect.width())
+                    self.assertGreaterEqual(optical.text_rect.height(), geometric.text_rect.height())
+
+    def test_optical_layout_keeps_ink_inside_each_style_without_changing_spacing_or_tail_lock(self):
+        for style in BUBBLE_TYPES:
+            for text in ("WWWWWWWWWW\nj", "j\nWWWWWWWWWW"):
+                with self.subTest(style=style, text=text):
+                    settings = replace(
+                        self.settings, style=style, text=text, line_length=0,
+                        optical_center=True, padding=0, tail_length=43,
+                        oval_custom=True, oval_vertical_padding=0, oval_squareness=70)
+                    geometry = self.renderer.geometry(settings)
+                    font = QFont(settings.font)
+                    font.setPixelSize(settings.font_size)
+                    preview = ET.fromstring(self.renderer.render(settings, preview=True).svg)
+                    exported = ET.fromstring(self.renderer.render(settings).svg)
+                    preview_text = list(preview.iter(SVG + "text"))
+                    exported_text = list(exported.iter(SVG + "text"))
+                    self.assertEqual([node.attrib for node in preview_text],
+                                     [node.attrib for node in exported_text])
+                    self.assertAlmostEqual(float(preview_text[1].attrib["y"])
+                                           - float(preview_text[0].attrib["y"]), settings.font_size)
+                    for line, node in zip(geometry.lines, preview_text):
+                        ink = glyph_bounds(font, line)
+                        ink.translate(QPointF(
+                            float(node.attrib["x"]) - geometry.metrics.horizontalAdvance(line) / 2,
+                            float(node.attrib["y"])))
+                        self.assertTrue(geometry.text_rect.adjusted(
+                            -1e-6, -1e-6, 1e-6, 1e-6).contains(ink))
+                        inset = ink.adjusted(0.01, 0.01, -0.01, -0.01)
+                        for corner in (inset.topLeft(), inset.topRight(),
+                                       inset.bottomLeft(), inset.bottomRight()):
+                            self.assertTrue(geometry.body.contains(corner))
+                    direction = QPointF(math.cos(settings.tail_angle), math.sin(settings.tail_angle))
+                    anchor = tail_anchor(geometry.body, geometry.body_rect.center(), direction)
+                    self.assertAlmostEqual(
+                        math.hypot(geometry.tip.x() - anchor.x(), geometry.tip.y() - anchor.y()), 43)
+
+    def test_optical_centering_without_visible_ink_retains_geometric_layout(self):
+        for text in ("", "\n\n", "  \n \n"):
+            settings = replace(self.settings, text=text, line_length=0)
+            self.assertEqual(self.renderer.render(settings).svg,
+                             self.renderer.render(replace(settings, optical_center=True)).svg)
 
     def test_zero_tail_handle_is_preview_only_and_obeys_lock(self):
         for locked in (False, True):
