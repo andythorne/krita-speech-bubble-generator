@@ -98,7 +98,8 @@ class BubbleRenderer:
         path = bubble.compose_tail(
             body, rect.center(), tip,
             TailParameters(size, settings.thought_size,
-                           settings.thought_irregularity, settings.thought_seed))
+                           settings.thought_irregularity, settings.thought_seed,
+                           settings.tail_curve, settings.tail_curve_direction))
         return Geometry(rect, text_rect, body, path, tip, lines, metrics)
 
     def render(self, settings: BubbleSettings, preview: bool = False) -> RenderResult:

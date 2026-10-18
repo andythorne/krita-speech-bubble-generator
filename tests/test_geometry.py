@@ -58,6 +58,93 @@ class GeometryTests(unittest.TestCase):
             self.assertEqual(bubble_path(body, QPointF(120, 50), None, style, 14), body)
             self.assertEqual(bubble_path(body, QPointF(120, 50), QPointF(120, 50), style, 14), body)
 
+    def test_curved_tails_follow_both_bends_in_every_direction(self):
+        rect = QRectF(0, 0, 240, 100)
+        for style in STYLES:
+            body = body_path(rect, style)
+            for degrees in range(0, 360, 30):
+                angle = math.radians(degrees)
+                direction = QPointF(math.cos(angle), math.sin(angle))
+                perpendicular = QPointF(-direction.y(), direction.x())
+                anchor = tail_anchor(body, rect.center(), direction)
+                tip = tail_tip(body, rect.center(), angle, 60)
+                for curve in (25, 100):
+                    for bend, sign in (("Up", -1), ("Down", 1)):
+                        with self.subTest(style=style, degrees=degrees,
+                                          curve=curve, bend=bend):
+                            path = bubble_path(
+                                body, rect.center(), tip, style, 14,
+                                curve=curve, curve_direction=bend)
+                            fractions = ((0.25, 0.58, 0.87) if style == "Thought"
+                                         else (0.2, 0.5, 0.8))
+                            for fraction in fractions:
+                                point = anchor + (tip - anchor) * fraction + perpendicular * (
+                                    sign * 60 * curve / 100 * 2 * fraction * (1 - fraction) ** 2)
+                                self.assertTrue(path.contains(point))
+                            self.assertTrue(path.contains(rect.center()))
+                            self.assertTrue(path_data(path).endswith("Z"))
+
+    def test_curved_short_speech_tails_keep_the_tip_and_taper(self):
+        rect = QRectF(0, 0, 240, 100)
+        for style in ("Oval", "Rounded", "Square", "Shouting"):
+            body = body_path(rect, style)
+            anchor = tail_anchor(body, rect.center(), QPointF(1, 0))
+            for length in (3, 14, 60):
+                for bend, sign in (("Up", -1), ("Down", 1)):
+                    with self.subTest(style=style, length=length, bend=bend):
+                        tip = tail_tip(body, rect.center(), 0, length)
+                        path = bubble_path(
+                            body, rect.center(), tip, style, 14,
+                            curve=100, curve_direction=bend)
+                        for fraction in (0.2, 0.5, 0.8):
+                            axis = anchor + QPointF(
+                                length * fraction,
+                                sign * length * 2 * fraction * (1 - fraction) ** 2)
+                            half_width = 14 * 0.4 * (1 - fraction)
+                            for side in (-1, 1):
+                                self.assertTrue(path.contains(
+                                    axis + QPointF(0, side * half_width * 0.7)))
+                                outside = axis + QPointF(0, side * (half_width + 0.5))
+                                if not body.contains(outside):
+                                    self.assertFalse(path.contains(outside))
+                        self.assertFalse(path.contains(tip + QPointF(0.1, 0)))
+                        self.assertEqual(body.subtracted(path).elementCount(), 0)
+
+    def test_curve_has_no_effect_without_a_tail_or_at_zero_amount(self):
+        rect = QRectF(0, 0, 240, 100)
+        for style in STYLES:
+            body = body_path(rect, style)
+            tip = tail_tip(body, rect.center(), 0, 60)
+            straight = bubble_path(body, rect.center(), tip, style, 14)
+            for bend in ("Up", "Down"):
+                with self.subTest(style=style, bend=bend):
+                    self.assertEqual(bubble_path(
+                        body, rect.center(), tip, style, 14,
+                        curve=0, curve_direction=bend), straight)
+                    self.assertEqual(bubble_path(
+                        body, rect.center(), None, style, 14,
+                        curve=100, curve_direction=bend), body)
+
+    def test_curved_speech_tails_ease_into_the_pointing_axis_without_a_hook(self):
+        rect = QRectF(0, 0, 240, 100)
+        for style in ("Oval", "Rounded", "Square", "Shouting"):
+            body = body_path(rect, style)
+            for degrees in range(0, 360, 45):
+                angle = math.radians(degrees)
+                direction = QPointF(math.cos(angle), math.sin(angle))
+                for length in (3, 14, 60, 140):
+                    tip = tail_tip(body, rect.center(), angle, length)
+                    for bend in ("Up", "Down"):
+                        with self.subTest(style=style, degrees=degrees,
+                                          length=length, bend=bend):
+                            path = bubble_path(
+                                body, rect.center(), tip, style, 14,
+                                curve=100, curve_direction=bend)
+                            near_tip = tip - direction * (length * 0.01)
+                            self.assertFalse(body.contains(near_tip))
+                            self.assertTrue(path.contains(near_tip))
+                            self.assertFalse(path.contains(tip + direction * 0.1))
+
     def test_small_speech_tails_keep_a_visible_width_without_extending_the_tip(self):
         rect = QRectF(0, 0, 240, 100)
         for style in ("Oval", "Rounded", "Square", "Shouting"):

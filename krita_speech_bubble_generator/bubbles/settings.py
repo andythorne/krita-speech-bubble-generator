@@ -37,6 +37,8 @@ class BubbleSettings:
     tail_length: int = 0
     tail_angle: float = math.pi / 4
     lock_tail: bool = True
+    tail_curve: int = 0
+    tail_curve_direction: str = "Up"
     thought_size: int = 100
     shout_irregularity: int = 50
     shout_shape: str = "Balanced"
@@ -63,6 +65,8 @@ class BubbleSettings:
             "tail_length": self.tail_length,
             "tail_angle": self.tail_angle,
             "lock_tail": self.lock_tail,
+            "tail_curve": self.tail_curve,
+            "tail_curve_direction": self.tail_curve_direction,
             "thought_size": self.thought_size,
             "shout_irregularity": self.shout_irregularity,
             "shout_shape": self.shout_shape,
@@ -83,6 +87,8 @@ class SavedBubble:
 # Fresh editor defaults and old records deliberately have different semantics.
 LEGACY_DEFAULTS: Dict[str, SettingValue] = {
     "lock_tail": True,
+    "tail_curve": 0,
+    "tail_curve_direction": "Up",
     "thought_size": 100,
     "shout_irregularity": 0,
     "shout_seed": 0,
@@ -97,6 +103,7 @@ INTEGER_RANGES: Dict[str, Tuple[int, int]] = {
     "outline": (0, 50),
     "padding": (0, 300),
     "line_length": (0, 100),
+    "tail_curve": (0, 100),
     "thought_size": (25, 400),
     "shout_nodes": (MIN_NODES, MAX_NODES),
     "thought_nodes": (MIN_NODES, MAX_NODES),
@@ -168,6 +175,9 @@ def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
         values.get("style"), BUBBLE_TYPES, "Unsupported bubble format")
     shout_shape = _registry_identifier(
         values.get("shout_shape"), SHOUTING_ALGORITHMS, "Invalid shouting shape")
+    tail_curve_direction = _string(values.get("tail_curve_direction"), "tail curve direction")
+    if tail_curve_direction not in ("Up", "Down"):
+        raise SettingsError("Invalid tail curve direction")
     if legacy:
         values.setdefault(
             "shout_nodes", SHOUTING_ALGORITHMS[shout_shape].legacy_nodes)
@@ -202,6 +212,8 @@ def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
         tail_length=tail_length,
         tail_angle=tail_angle,
         lock_tail=lock_tail,
+        tail_curve=integers["tail_curve"],
+        tail_curve_direction=tail_curve_direction,
         thought_size=integers["thought_size"],
         shout_irregularity=integers["shout_irregularity"],
         shout_shape=shout_shape,

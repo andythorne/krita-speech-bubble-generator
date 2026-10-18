@@ -26,6 +26,7 @@ class SettingsTests(unittest.TestCase):
             fill="#123456", stroke="#654321", text_color="#112233",
             outline=5, padding=120, autocenter=False, line_length=30,
             tail_length=50, tail_angle=-1.5, lock_tail=False, thought_size=125,
+            tail_curve=73, tail_curve_direction="Down",
             shout_irregularity=70, shout_shape="Expressive", shout_nodes=32,
             shout_seed=123, thought_irregularity=60, thought_nodes=20,
             thought_seed=456)
@@ -52,7 +53,8 @@ class SettingsTests(unittest.TestCase):
             BubbleSettings(), style="Shouting", text="A & B\n\u00e9!",
             font="Serif", tail_length=80, tail_angle=-2.8,
             lock_tail=False, shout_shape="Expressive", shout_seed=1729,
-            thought_seed=2718, shout_nodes=37, thought_nodes=29)
+            thought_seed=2718, shout_nodes=37, thought_nodes=29,
+            tail_curve=73, tail_curve_direction="Down")
         baseline = QTransform(0.8, 0.2, -0.1, 1.5, -7, 12)
         encoded = encode_record(settings, baseline)
         record = decode_record(encoded)
@@ -65,7 +67,7 @@ class SettingsTests(unittest.TestCase):
         for field in (
             "lock_tail", "thought_size", "shout_irregularity", "shout_seed",
             "shout_shape", "shout_nodes", "thought_irregularity", "thought_nodes",
-            "thought_seed", "padding",
+            "thought_seed", "padding", "tail_curve", "tail_curve_direction",
         ):
             del values[field]
         old = deepcopy(values)
@@ -78,6 +80,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(normalized["thought_nodes"], 16)
         self.assertEqual(normalized["padding"], 150)
         self.assertTrue(normalized["lock_tail"])
+        self.assertEqual(normalized["tail_curve"], 0)
+        self.assertEqual(normalized["tail_curve_direction"], "Up")
         fresh = settings_from_dict({})
         self.assertEqual(fresh.shout_irregularity, 50)
         self.assertEqual(fresh.thought_irregularity, 50)
@@ -120,6 +124,12 @@ class SettingsTests(unittest.TestCase):
         del values["version"]
         with self.assertRaises(SettingsError):
             validate_settings(values)
+
+    def test_invalid_tail_curve_directions_are_rejected(self):
+        for value in ("Unknown", "up", "", None, 42, [], {}):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(SettingsError, "tail curve direction"):
+                    validate_settings(self.record(tail_curve_direction=value))
 
     def test_missing_required_fields_do_not_become_fresh_defaults(self):
         for key in ("text", "font", "font_size", "tail_length", "autocenter"):

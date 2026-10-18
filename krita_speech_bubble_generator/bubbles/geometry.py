@@ -75,13 +75,15 @@ def tail_tip(path: QPainterPath, center: QPointF, angle: float,
 
 def bubble_path(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
                 style: str, font_size: float, thought_size: int = 100,
-                irregularity: int = 0, seed: int = 0) -> QPainterPath:
+                irregularity: int = 0, seed: int = 0, curve: int = 0,
+                curve_direction: str = "Up") -> QPainterPath:
     """Compose a direct outline and tail through the selected type's policy."""
     from .registry import resolve_bubble
     from .types import TailParameters
 
     return resolve_bubble(style).compose_tail(
-        body, center, tip, TailParameters(font_size, thought_size, irregularity, seed))
+        body, center, tip,
+        TailParameters(font_size, thought_size, irregularity, seed, curve, curve_direction))
 
 
 def _tail_geometry(body: QPainterPath, center: QPointF,
@@ -100,9 +102,16 @@ def _tail_geometry(body: QPainterPath, center: QPointF,
     return direction, anchor, length
 
 
+def _tail_bend(direction: QPointF, length: float, curve: int,
+               curve_direction: str) -> QPointF:
+    sign = -1 if curve_direction == "Up" else 1
+    return QPointF(-direction.y(), direction.x()) * (length * curve / 100 * sign)
+
+
 def thought_trail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
                   font_size: float, thought_size: int = 100,
-                  irregularity: int = 0, seed: int = 0) -> QPainterPath:
+                  irregularity: int = 0, seed: int = 0, curve: int = 0,
+                  curve_direction: str = "Up") -> QPainterPath:
     geometry = _tail_geometry(body, center, tip)
     if geometry is None or tip is None:
         return QPainterPath(body)
@@ -111,11 +120,13 @@ def thought_trail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
     generator = random.Random("thought-trail-{}".format(seed))
     amount = irregularity / 100
     perpendicular = QPointF(-direction.y(), direction.x())
+    bend = _tail_bend(direction, length, curve, curve_direction)
     for fraction, scale in ((0.25, 1), (0.58, 0.7), (0.87, 0.4)):
         radius = min(font_size * 0.32, length * 0.13) * thought_size / 100 * scale
         fraction += generator.uniform(-0.04, 0.04) * amount
         blob_center = anchor + (tip - anchor) * fraction + perpendicular * (
             radius * generator.uniform(-0.65, 0.65) * amount)
+        blob_center += bend * (2 * fraction * (1 - fraction) ** 2)
         radius_x = radius * (1 + generator.uniform(-0.35, 0.6) * amount)
         radius_y = radius * (1 + generator.uniform(-0.35, 0.6) * amount)
         rotation = generator.uniform(-65, 65) * amount
@@ -125,22 +136,34 @@ def thought_trail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
 
 
 def speech_tail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
-                font_size: float) -> QPainterPath:
+                font_size: float, curve: int = 0,
+                curve_direction: str = "Up") -> QPainterPath:
     geometry = _tail_geometry(body, center, tip)
     if geometry is None or tip is None:
         return QPainterPath(body)
-    direction, anchor, _ = geometry
+    direction, anchor, length = geometry
     perpendicular = QPointF(-direction.y(), direction.x())
     left = outline_anchor(body, center, perpendicular) - center
     right = outline_anchor(body, center, -perpendicular) - center
     inside_radius = min(math.hypot(left.x(), left.y()), math.hypot(right.x(), right.y()))
     half_width = min(font_size * 0.4, inside_radius * 0.5)
     tail = QPainterPath()
-    # Both sides share the bubble-center-to-tip axis, including the inset base.
+    # Keep the inset base centered on the body-to-tip axis, even for curved tails.
     tail.moveTo(center + perpendicular * half_width)
     tail.lineTo(anchor + perpendicular * half_width)
-    tail.lineTo(tip)
-    tail.lineTo(anchor - perpendicular * half_width)
+    if curve:
+        # Ease the bend out before the tip instead of curling back into a hook.
+        control_start = anchor + direction * (length / 3) + _tail_bend(
+            direction, length, curve, curve_direction) * (2 / 3)
+        control_end = tip - direction * (length / 3)
+        tail.cubicTo(control_start + perpendicular * (half_width * 2 / 3),
+                     control_end + perpendicular * (half_width / 3), tip)
+        tail.cubicTo(control_end - perpendicular * (half_width / 3),
+                     control_start - perpendicular * (half_width * 2 / 3),
+                     anchor - perpendicular * half_width)
+    else:
+        tail.lineTo(tip)
+        tail.lineTo(anchor - perpendicular * half_width)
     tail.lineTo(center - perpendicular * half_width)
     tail.closeSubpath()
     return body.united(tail)

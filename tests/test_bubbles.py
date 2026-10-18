@@ -505,6 +505,39 @@ class EditorTests(unittest.TestCase):
         self.assertAlmostEqual(math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y()), 60)
         self.warn.assert_not_called()
 
+    def test_tail_curves_live_update_and_reopen_without_changing_body_or_tip(self):
+        for style in STYLES:
+            with self.subTest(style=style):
+                self.docker.stopEditing()
+                self.docker.bubbleType.setCurrentText(style)
+                self.docker.tailSpinBox.setValue(60)
+                self.docker.view.tailCurveSpinBox.setValue(0)
+                self.docker.view.tailCurveDirection.setCurrentText("Up")
+                document, layer, group = self.editTarget()
+                before = self.docker.geometry()
+                seeds = self.docker.shoutSeed, self.docker.thoughtSeed
+                self.docker.view.tailCurveSpinBox.setValue(70)
+                self.docker.view.tailCurveDirection.setCurrentText("Down")
+                self.assertTrue(self.docker.pendingLiveUpdate)
+                self.docker.applyLiveUpdate()
+                saved = json.loads(bytes(document.annotation(self.docker.annotationKey(layer))))
+                self.assertEqual((saved["tail_curve"], saved["tail_curve_direction"]), (70, "Down"))
+                curved = self.docker.geometry()
+                self.assertEqual(curved.body, before.body)
+                self.assertEqual(curved.text_rect, before.text_rect)
+                self.assertEqual(curved.tip, before.tip)
+                self.assertNotEqual(curved.path, before.path)
+                self.assertEqual((self.docker.shoutSeed, self.docker.thoughtSeed), seeds)
+                self.assertTrue(self.docker.preview.renderer().isValid())
+                self.docker.stopEditing()
+                self.docker.view.tailCurveSpinBox.setValue(0)
+                self.docker.view.tailCurveDirection.setCurrentText("Up")
+                self.docker.loadSelectedBubble()
+                self.assertEqual(self.docker.view.tailCurveSlider.value(), 70)
+                self.assertEqual(self.docker.view.tailCurveDirection.currentText(), "Down")
+                self.assertEqual(self.docker.geometry().path, curved.path)
+        self.warn.assert_not_called()
+
     def test_invalid_saved_padding_is_rejected(self):
         document, layer, group = self.editTarget()
         key = self.docker.annotationKey(layer)

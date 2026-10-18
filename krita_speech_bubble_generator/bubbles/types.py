@@ -43,6 +43,8 @@ class TailParameters:
     thought_size: int = 100
     irregularity: int = 0
     seed: int = 0
+    curve: int = 0
+    curve_direction: str = "Up"
 
 
 def _rectangular_enclosure(width: float, height: float, padding: float) -> QRectF:
@@ -76,7 +78,8 @@ class BubbleType(ABC):
 
     def compose_tail(self, body: QPainterPath, center: QPointF,
                      tip: Optional[QPointF], parameters: TailParameters) -> QPainterPath:
-        return speech_tail(body, center, tip, parameters.font_size)
+        return speech_tail(body, center, tip, parameters.font_size,
+                           parameters.curve, parameters.curve_direction)
 
     def with_algorithm(self, algorithm: ShoutingAlgorithm) -> BubbleType:
         return self
@@ -172,7 +175,8 @@ class ThoughtBubble(BubbleType):
                      tip: Optional[QPointF], parameters: TailParameters) -> QPainterPath:
         return thought_trail(body, center, tip, parameters.font_size,
                              parameters.thought_size, parameters.irregularity,
-                             parameters.seed)
+                             parameters.seed, parameters.curve,
+                             parameters.curve_direction)
 
 
 class ShoutingBubble(BubbleType):

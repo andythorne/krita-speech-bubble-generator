@@ -28,7 +28,8 @@ class PreferencesTests(unittest.TestCase):
             BubbleSettings(), style="Shouting", text="Remember me\nand this line",
             font="DejaVu Sans", font_size=22, padding=43, outline=7,
             tail_angle=-0.5, tail_length=83, shout_shape="Expressive",
-            thought_nodes=27, shout_seed=1729, thought_seed=2718),
+            thought_nodes=27, shout_seed=1729, thought_seed=2718,
+            tail_curve=73, tail_curve_direction="Down"),
             background_enabled=False, new_layer=False)
         self.store().save(expected)
         self.assertTrue(Path(self.path).is_file())

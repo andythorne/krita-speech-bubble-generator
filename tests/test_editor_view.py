@@ -59,7 +59,9 @@ class EditorViewTests(unittest.TestCase):
                 self.view.thoughtGroup)),
             (self.view.tailTab, (
                 self.view.tailCompass, self.view.lockTailLength,
-                self.view.tailSlider, self.view.tailSpinBox, self.view.thoughtSizeGroup)),
+                self.view.tailSlider, self.view.tailSpinBox, self.view.thoughtSizeGroup,
+                self.view.tailCurveSlider, self.view.tailCurveSpinBox,
+                self.view.tailCurveDirection)),
             (self.view.importTab, (
                 self.view.importInstructions, self.view.importLimitations,
                 self.view.importOldBubble)),
@@ -124,7 +126,7 @@ class EditorViewTests(unittest.TestCase):
             line_length=24, shout_shape="Expressive", shout_nodes=37, thought_nodes=29,
             shout_irregularity=85, thought_irregularity=75, shout_seed=1729, thought_seed=2718,
             tail_angle=-2.1, thought_size=275, fill="#123456", stroke="#654321",
-            text_color="#112233")
+            text_color="#112233", tail_curve=73, tail_curve_direction="Down")
         result = self.view.load_settings(loaded)
         self.assertEqual(result, loaded)
         self.assertEqual(len(edits), 0)
@@ -137,6 +139,29 @@ class EditorViewTests(unittest.TestCase):
         self.assertTrue(self.view.shoutingGroup.isHidden())
         self.assertEqual(self.view.shoutingSlider.value(), 85)
         self.assertEqual(self.view.thoughtNodesSlider.value(), 29)
+        self.assertEqual(self.view.tailCurveSlider.value(), 73)
+        self.assertEqual(self.view.tailCurveDirection.currentText(), "Down")
+
+    def test_tail_curve_controls_emit_snapshots_without_changing_length_or_seeds(self):
+        initial = replace(
+            self.view.initial_settings(), tail_length=65, lock_tail=False,
+            shout_seed=17, thought_seed=29)
+        self.view.load_settings(initial)
+        edits = QSignalSpy(self.view.edited)
+        self.view.tailCurveSlider.setValue(70)
+        curved = replace(initial, tail_curve=70)
+        self.assertEqual(self.view.tailCurveSpinBox.value(), 70)
+        self.assertEqual(list(edits), [[curved, ("tail_curve",)]])
+        self.view.tailCurveDirection.setCurrentText("Down")
+        down = replace(curved, tail_curve_direction="Down")
+        self.assertEqual(edits[1], [down, ("tail_curve_direction",)])
+        self.view.tailCurveSpinBox.setValue(25)
+        self.assertEqual(self.view.tailCurveSlider.value(), 25)
+        self.assertEqual(edits[2], [replace(down, tail_curve=25), ("tail_curve",)])
+        reflected = replace(down, tail_curve=45, tail_curve_direction="Up")
+        self.view.reflect_settings(reflected)
+        self.assertEqual(self.view.initial_settings(), reflected)
+        self.assertEqual(len(edits), 3)
 
     def test_user_edit_emits_one_snapshot_and_intent_but_never_generates_seeds(self):
         initial = replace(self.view.initial_settings(), shout_seed=17, thought_seed=29)

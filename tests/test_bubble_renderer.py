@@ -136,6 +136,35 @@ class BubbleRendererTests(unittest.TestCase):
         self.assertEqual(preview.view_box,
                          geometry.path.boundingRect().adjusted(-27, -27, 27, 27))
 
+    def test_curves_preserve_body_text_tip_and_shared_preview_export_path(self):
+        for style in BUBBLE_TYPES:
+            settings = replace(self.settings, style=style, tail_length=100)
+            straight = self.renderer.geometry(settings)
+            for bend in ("Up", "Down"):
+                with self.subTest(style=style, bend=bend):
+                    curved = replace(settings, tail_curve=80, tail_curve_direction=bend)
+                    geometry = self.renderer.geometry(curved)
+                    self.assertEqual(geometry.body, straight.body)
+                    self.assertEqual(geometry.body_rect, straight.body_rect)
+                    self.assertEqual(geometry.text_rect, straight.text_rect)
+                    self.assertEqual(geometry.lines, straight.lines)
+                    self.assertEqual(geometry.tip, straight.tip)
+                    self.assertNotEqual(geometry.path, straight.path)
+                    self.assertEqual(geometry.path, bubble_path(
+                        geometry.body, geometry.body_rect.center(), geometry.tip,
+                        style, settings.font_size, settings.thought_size,
+                        settings.thought_irregularity, settings.thought_seed, 80, bend))
+                    preview = self.renderer.render(curved, preview=True)
+                    exported = self.renderer.render(curved)
+                    self.assertEqual(
+                        ET.fromstring(preview.svg).find(".//" + SVG + "path").attrib,
+                        ET.fromstring(exported.svg).find(".//" + SVG + "path").attrib)
+                    self.assertTrue(preview.view_box.contains(geometry.path.boundingRect()))
+                    moved = self.renderer.move_tail(curved, geometry.tip + QPointF(10, 20))
+                    self.assertEqual(moved.tail_length, curved.tail_length)
+                    self.assertEqual(moved.tail_curve, 80)
+                    self.assertEqual(moved.tail_curve_direction, bend)
+
     def test_oval_is_fuller_and_encloses_short_long_and_multiline_text(self):
         for text in ("Hi", "A very long unwrapped line of dialogue", "One\nTwo\nThree", ""):
             for padding in (0, 10, 150, 300):

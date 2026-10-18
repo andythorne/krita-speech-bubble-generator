@@ -226,6 +226,22 @@ class BubbleEditorView(QScrollArea):
         length_column.addWidget(self.tailLengthControls)
         tail_columns.addLayout(length_column, 1)
         tail_layout.addLayout(tail_columns)
+        curve_group = QGroupBox("Curve (0 keeps tail straight)")
+        curve_layout = QVBoxLayout()
+        self.tailCurveSlider, self.tailCurveSpinBox, curve_row = self.numberRow("tail_curve")
+        self.tailCurveSpinBox.setSuffix("%")
+        curve_layout.addLayout(curve_row)
+        direction_row = QHBoxLayout()
+        direction_row.addWidget(QLabel("Direction"))
+        self.tailCurveDirection = QComboBox()
+        self.tailCurveDirection.addItems(("Up", "Down"))
+        self.tailCurveDirection.setToolTip(
+            "Bend to either side of the center-to-tip line. Up and Down are relative "
+            "to a tail pointing right and rotate with the tail.")
+        direction_row.addWidget(self.tailCurveDirection, 1)
+        curve_layout.addLayout(direction_row)
+        curve_group.setLayout(curve_layout)
+        tail_layout.addWidget(curve_group)
         self.thoughtSizeGroup = QGroupBox("Thought blob size")
         self.thoughtSizeSlider, self.thoughtSizeSpinBox, thought_row = self.numberRow("thought_size")
         self.thoughtSizeSpinBox.setSuffix("%")
@@ -259,6 +275,7 @@ class BubbleEditorView(QScrollArea):
             "font_size": self.speechFontSize, "outline": self.outlineSpinBox,
             "padding": self.paddingSpinBox, "line_length": self.averageLineLengthSpinBox,
             "tail_length": self.tailSpinBox, "thought_size": self.thoughtSizeSpinBox,
+            "tail_curve": self.tailCurveSpinBox,
             "shout_irregularity": self.shoutingSpinBox, "shout_nodes": self.shoutingNodesSpinBox,
             "thought_irregularity": self.thoughtSpinBox, "thought_nodes": self.thoughtNodesSpinBox,
         }
@@ -273,6 +290,8 @@ class BubbleEditorView(QScrollArea):
         self.autocenter.toggled.connect(lambda: self._emit("autocenter"))
         self.lockTailLength.toggled.connect(self.tailLengthControls.setEnabled)
         self.lockTailLength.toggled.connect(lambda: self._emit("lock_tail"))
+        self.tailCurveDirection.currentIndexChanged.connect(
+            lambda: self._emit("tail_curve_direction"))
         self.shoutingShape.currentIndexChanged.connect(lambda: self._emit("shout_shape"))
         for attribute, field, button in (
             ("bubbleColor", "fill", self.bubbleColorButton),
@@ -400,6 +419,7 @@ class BubbleEditorView(QScrollArea):
             font=self.speechFont.currentFont().family(), fill=self.bubbleColor.name(),
             stroke=self.outlineColor.name(), text_color=self.speechFontColor.name(),
             autocenter=self.autocenter.isChecked(), lock_tail=self.lockTailLength.isChecked(),
+            tail_curve_direction=self.tailCurveDirection.currentText(),
             shout_shape=self.shoutingShape.currentText())
 
     def load_settings(self, settings: BubbleSettings) -> BubbleSettings:
@@ -439,6 +459,8 @@ class BubbleEditorView(QScrollArea):
                 self.tailLengthControls.setEnabled(settings.lock_tail)
             if "shout_shape" in changed:
                 self.shoutingShape.setCurrentText(settings.shout_shape)
+            if "tail_curve_direction" in changed:
+                self.tailCurveDirection.setCurrentText(settings.tail_curve_direction)
             for attribute, field, value, button in (
                 ("bubbleColor", "fill", settings.fill, self.bubbleColorButton),
                 ("outlineColor", "stroke", settings.stroke, self.outlineColorButton),

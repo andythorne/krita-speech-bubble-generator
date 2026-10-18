@@ -75,10 +75,13 @@ refactoring: a saved seed must continue producing the same outline.
 
 Enclosure padding is a bubble policy: non-oval styles keep a text-size-scaled
 minimum margin plus outline clearance, while Oval retains its zero-padding fit.
-Tail angles and symmetry use the line from the body center to the pointer,
+Tail angles and straight-tail symmetry use the line from the body center to the pointer,
 never the combined body-and-tail bounds or a nearest-edge normal. Intersect that
 ray with the actual body for the tail-length origin; do not snap to supporting
 corners or spikes. Keep dragging and preview/export consistent.
+Curvature offsets rotate with that axis without moving the pointer or changing
+the straight-line tail-length setting. Use the same bend for speech tails and
+thought trails, preserving seeded blob sizes and irregularity.
 
 Add contract coverage for each implementation, and specific geometry coverage
 where its behavior differs. A new persisted option may also require settings,

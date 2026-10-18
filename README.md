@@ -12,7 +12,7 @@ dialogue, choose a style, and drag the tail into place.
 | Five bubble styles | Choose Oval, Rounded, Square, Thought or Shouting. New and imported bubbles default to Oval. |
 | Shouting shapes | Choose Balanced curves, Angular straight-sided spikes, Punchy's shorter, broader spikes, or Expressive curves with varied spacing and gentle lean. |
 | Adjustable nodes | Set 8-64 nodes for more or fewer shouting spikes or thought-cloud lobes. Each bubble keeps its node counts. |
-| Tail positioning | Choose one of eight compass directions or drag freely in the preview, without snapping to corners or spikes. The tail is symmetric around the line from the bubble's body center to its tip, with an optional length lock. |
+| Tail positioning and curves | Choose one of eight compass directions or drag freely in the preview, without snapping to corners or spikes. Keep a straight tail or adjust its curve amount and Up/Down direction, with an optional length lock. Thought trails can curve too. |
 | Expressive shapes | Adjust thought-cloud irregularity, thought-trail blob size, and shouting-spike spacing with subtle height and valley-depth variation. Your pattern stays stable while you edit. |
 | Text and appearance | Choose fonts, text size, fill and outline colours, with the original plugin's automatic wrapping, text sizing and tight line spacing. Control line breaks yourself when needed. Drag the grip below the text input to resize it. |
 | Organised controls | Use the Text, Bubble and Tail tabs to find related options, or Import for old bubbles and its limitations. The preview and page actions are shared across all tabs. |
@@ -61,7 +61,8 @@ conversion is needed. For bubbles made with the original upstream plugin, use
 3. In the **Tail** tab, set a length above zero, then click a compass direction
    or drag the blue preview handle to aim it.
    Leave **Lock tail length** on to change direction only, or turn it off to
-   adjust both direction and length by dragging.
+   adjust both direction and length by dragging. Use **Curve** for a bent tail,
+   and choose **Up** or **Down** for its direction; 0% keeps it straight.
 4. Choose **New vector layer** or **Selected vector layer**, then click
    **Add on Page**.
 5. Move the bubble on the canvas with Krita's shape-selection tool. Click
@@ -89,13 +90,20 @@ With **Lock tail length** off, the blue handle stays visible even at zero length
 Drag it outward to create a tail, or into the bubble to reduce the length to zero.
 The compass changes direction only, whether the length lock is on or off.
 Its diagonals select 45-degree directions from the center of the bubble's body.
-The tail stays symmetric around the center-to-tip line; the tail itself is not
+Straight tails stay symmetric around the center-to-tip line; the tail itself is not
 included when finding the center. At zero length the compass sets the direction
 for when you next extend the tail. Dragging allows any angle without snapping
 to compass directions, rectangular corners or shouting spikes.
 Short speech tails keep a broad base rather than becoming narrow slivers at low
 lengths, so values such as 3 remain useful for small tails. Speech tails taper
-with straight sides to a sharp point, rather than bulging outward.
+to a sharp point rather than bulging outward. Curved tails ease back into the
+pointing direction near the tip, avoiding a hooked end.
+Below the position and length controls, **Curve** sets the bend from 0% (straight)
+to 100%. **Direction** chooses **Up** or **Down**, relative to a tail pointing
+right; the bend rotates with the tail when you aim it elsewhere. Curving keeps
+the same tip position and length setting, which measures the straight distance
+from the body to the tip, not the distance along the curve. For Thought bubbles,
+the trail blobs follow the curve without changing their seeded pattern.
 Resizing the text input keeps the preview height and the controls above it
 unchanged.
 
