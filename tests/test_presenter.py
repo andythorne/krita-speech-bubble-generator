@@ -239,6 +239,18 @@ class PresenterTests(unittest.TestCase):
         self.assertIsNone(self.presenter.state.pending)
         self.assertEqual(self.seeds.call_count, 2)
 
+    def test_deselecting_and_starting_new_preserves_the_current_bubble_type(self):
+        loaded = self.bind("selected", style="Thought")
+        self.gateway.select(loaded, selected=False)
+        self.presenter.sync_selection()
+        self.assertIsNone(self.presenter.state.target)
+        self.assertEqual(self.presenter.state.draft.style, "Thought")
+        self.assertEqual(self.view.settings.style, "Thought")
+
+        self.presenter.start_new()
+        self.assertEqual(self.presenter.state.draft.style, "Thought")
+        self.assertEqual(self.view.settings.style, "Thought")
+
     def test_copying_again_replaces_style_and_paste_without_copy_warns(self):
         initial = self.presenter.state.draft
         self.view.paste_style_requested.emit()

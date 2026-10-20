@@ -199,9 +199,6 @@ class EditorPresenter(QObject):
         self.flush_live_update()
         selection = self.gateway.deselect()
         self.stop_editing()
-        self.state.draft = self.view.reflect_settings(
-            replace(self.state.draft, style=BubbleSettings().style))
-        self.render()
         self.state.observed = selection
         self.view.show_mode(False, "New bubble")
 
@@ -232,9 +229,6 @@ class EditorPresenter(QObject):
     def stop_editing(self) -> None:
         self._cancel_live()
         self._cancel_background()
-        if self.state.target is not None:
-            self.state.draft = self.view.reflect_settings(
-                replace(self.state.draft, style=BubbleSettings().style))
         self.state.target = None
         self.state.applied = None
         self.view.show_mode(False, "New bubble - select a bubble to edit")

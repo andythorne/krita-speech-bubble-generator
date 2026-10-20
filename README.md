@@ -9,7 +9,7 @@ dialogue, choose a style, and drag the tail into place.
 
 | Feature | What you can do |
 | --- | --- |
-| Five bubble styles | Choose Oval, Rounded, Square, Thought or Shouting. New and imported bubbles default to Oval. |
+| Five bubble styles | Choose Oval, Rounded, Square, Thought or Shouting. Initial and imported bubbles default to Oval; leaving a bubble preserves its current type for the next one. |
 | Shouting shapes | Choose Balanced curves, Angular straight-sided spikes, Punchy's shorter, broader spikes, or Expressive curves with varied spacing and gentle lean. |
 | Adjustable nodes | Set 8-64 nodes for more or fewer shouting spikes or thought-cloud lobes. Each bubble keeps its node counts. |
 | Tail positioning and curves | Choose one of eight compass directions or drag freely in the preview, without snapping to corners or spikes. Keep a straight tail or adjust its curve amount and Up/Down direction, with an optional length lock. Thought trails can curve too. |
@@ -20,7 +20,7 @@ dialogue, choose a style, and drag the tail into place.
 | Copy and paste styles | Reuse font, text size and colour, wrapping and centering, all Bubble-tab options and tail curve settings across multiple bubbles without replacing their dialogue. |
 | Bubble padding | Adjust the space around the text, with horizontal padding changing twice as strongly as vertical padding. At 0%, only the clearance needed for the outline and shape remains, without a built-in text-size margin. |
 | Customisable ovals | Enable independent horizontal/vertical padding for flatter ovals around wide text, and adjust Squareness from an ellipse to a softly squared outline. Leave customisation off for the original fuller proportions. |
-| Remembered options | Dialogue, font, colours, padding, layout, tail and style-specific options, canvas-background preference and layer destination are remembered between sessions. Each new bubble still defaults to Oval. |
+| Remembered options | Dialogue, font, colours, padding, layout, tail and style-specific options, canvas-background preference and layer destination are remembered between sessions. Each session begins with Oval selected. |
 | Live editing | Select a saved bubble to edit its text and appearance directly from the docker. Changes appear on the canvas after a short pause. |
 | Canvas-aware preview | See the surrounding artwork while editing, so you can point the tail at the right character. |
 | Flexible layers | Create a new vector layer or keep several independently editable bubbles on one layer. Move bubbles or merge vector layers without losing their editing settings. |
@@ -74,10 +74,10 @@ conversion is needed. For bubbles made with the original upstream plugin, use
    **New bubble** in the docker when you are ready to create another one.
 
 The docker remembers your dialogue and options when you restart Krita, including
-changes made before adding a bubble to the page. New bubbles always start as
-**Oval**, including when you leave an existing bubble to create another.
-Selecting an existing bubble still restores that bubble's own saved style and
-settings.
+changes made before adding a bubble to the page. The initial bubble type is
+**Oval**; when you leave an existing bubble to create another, its type and
+settings stay selected. Selecting an existing bubble still restores that
+bubble's own saved style and settings.
 
 To emphasise individual words, select them in the text input and click **Bold**
 or **Italic**, or press **Ctrl+B** or **Ctrl+I** while the input has focus.

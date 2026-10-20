@@ -1150,7 +1150,7 @@ class EditorTests(unittest.TestCase):
         self.assertIsNone(self.docker.editLayerId)
         self.assertFalse(any(shape.isSelected() for shape in first.shapes()))
         self.assertEqual(self.docker.addOnPage.text(), "Add on Page")
-        self.assertEqual(self.docker.bubbleType.currentText(), "Oval")
+        self.assertEqual(self.docker.bubbleType.currentText(), "Square")
         self.assertEqual(json.loads(bytes(document.annotation(
             self.docker.annotationKey(first))))["style"], "Square")
         self.assertFalse(self.docker.addDestination.isHidden())
