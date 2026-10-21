@@ -319,10 +319,12 @@ class EditorViewTests(unittest.TestCase):
         for style in BUBBLE_TYPES:
             self.view.bubbleType.setCurrentText(style)
             self.assertEqual(self.view.ovalGroup.isHidden(),
-                             not BUBBLE_TYPES[style].capabilities.oval)
+                             not BUBBLE_TYPES[style].capabilities.custom_enclosure)
             self.assertEqual(self.view.initial_settings(), replace(initial, style=style))
             self.assertEqual(self.view.paddingGroup.title(),
-                             "Horizontal padding" if style == "Oval" else "Padding")
+                             "Horizontal padding"
+                             if BUBBLE_TYPES[style].capabilities.custom_enclosure
+                             else "Padding")
         edits = QSignalSpy(self.view.edited)
         reflected = replace(initial, oval_vertical_padding=0, oval_squareness=50)
         self.view.reflect_settings(reflected)

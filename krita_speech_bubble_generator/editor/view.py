@@ -179,12 +179,12 @@ class BubbleEditorView(QScrollArea):
             "At 0%, only the clearance needed for the outline and shape remains.")
         self.paddingGroup.setLayout(padding_row)
         bubble_options.addWidget(self.paddingGroup)
-        self.ovalGroup = QGroupBox("Customise oval")
+        self.ovalGroup = QGroupBox("Customise shape")
         self.ovalGroup.setCheckable(True)
         self.ovalGroup.setChecked(False)
         self.ovalGroup.setToolTip(
-            "Allow flatter ovals and independent horizontal and vertical padding. "
-            "Turn off to restore the original oval proportions.")
+            "Use independent horizontal and vertical padding and adjust squareness. "
+            "Turn off to restore the original bubble proportions.")
         oval_layout = QVBoxLayout()
         oval_layout.addWidget(QLabel("Vertical padding"))
         (self.ovalVerticalPaddingSlider, self.ovalVerticalPaddingSpinBox,
@@ -193,12 +193,12 @@ class BubbleEditorView(QScrollArea):
         self.ovalVerticalPaddingSpinBox.setToolTip(
             "Space above and below the text as a percentage of text size.")
         oval_layout.addLayout(vertical_padding_row)
-        oval_layout.addWidget(QLabel("Squareness (0 is an ellipse)"))
+        oval_layout.addWidget(QLabel("Squareness (0 is an elliptical base)"))
         (self.ovalSquarenessSlider, self.ovalSquarenessSpinBox,
          squareness_row) = self.numberRow("oval_squareness")
         self.ovalSquarenessSpinBox.setSuffix("%")
         self.ovalSquarenessSpinBox.setToolTip(
-            "Make the oval fuller at its corners, towards a softly squared shape. "
+            "Make the bubble fuller at its corners, towards a softly squared shape. "
             "Higher values fit the text more closely.")
         oval_layout.addLayout(squareness_row)
         self.ovalGroup.setLayout(oval_layout)
@@ -487,14 +487,14 @@ class BubbleEditorView(QScrollArea):
         self.thoughtSizeGroup.setVisible(capabilities.thought)
         self.thoughtGroup.setVisible(capabilities.thought)
         self.shoutingGroup.setVisible(capabilities.shouting)
-        self.ovalGroup.setVisible(capabilities.oval)
+        self.ovalGroup.setVisible(capabilities.custom_enclosure)
         self._update_padding_label()
         self._emit("style")
 
     def _update_padding_label(self) -> None:
         capabilities = resolve_bubble(
             self.bubbleType.currentText(), self.shoutingShape.currentText()).capabilities
-        custom = capabilities.oval and self.ovalGroup.isChecked()
+        custom = capabilities.custom_enclosure and self.ovalGroup.isChecked()
         self.paddingGroup.setTitle("Horizontal padding" if custom else "Padding")
         self.paddingGroup.setToolTip(
             "Space on each side of the text: 100% adds twice the text size per side."

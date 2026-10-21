@@ -83,10 +83,14 @@ including holes and overlapping strokes, and expand the enclosure as needed
 without changing wrapping or baseline spacing. Empty lettering retains the
 geometric layout.
 Use `BubbleType.enclose_text` for settings-aware enclosure sizing; the default
-delegates to `body_rect`. Oval's opt-in custom enclosure fits the padded text
-to its smooth quarter-curves, with independent vertical padding and no 2:1
-aspect-ratio cap. Retain the original 2:1 aspect-ratio cap when customisation is
-off. Share the curve parameters between sizing and drawing.
+delegates to `body_rect`. Oval, Thought and Shouting share an opt-in custom
+enclosure that fits the padded text to its smooth quarter-curves, with independent
+vertical padding and no 2:1 aspect-ratio cap. Retain each style's original
+proportions when customisation is off, including Oval's 2:1 aspect-ratio cap.
+Share the curve parameters between sizing and drawing. The saved
+`oval_custom`, `oval_vertical_padding` and `oval_squareness` fields apply to all
+three styles; retain these names for compatibility. Keep cloud lobes and spike
+patterns seeded while shaping their underlying contour.
 Tail angles and straight-tail symmetry use the line from the body center to the pointer,
 never the combined body-and-tail bounds or a nearest-edge normal. Intersect that
 ray with the actual body for the tail-length origin; do not snap to supporting

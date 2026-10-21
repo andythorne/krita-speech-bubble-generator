@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import random
 from typing import Optional, TYPE_CHECKING
@@ -12,7 +12,8 @@ from PyQt5.QtCore import QPointF, QRectF
 from PyQt5.QtGui import QPainterPath
 
 from .geometry import (
-    ellipse_path, ellipse_transform, speech_tail, thought_trail, validate_nodes,
+    ellipse_path, ellipse_transform, oval_curve_control, oval_path, speech_tail,
+    squared_ellipse_point, thought_trail, validate_nodes,
 )
 from .shouting_algorithms import ShoutingAlgorithm
 
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 class BubbleCapabilities:
     thought: bool = False
     shouting: bool = False
-    oval: bool = False
+    custom_enclosure: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,13 +69,23 @@ class BubbleType(ABC):
         """Enclose the measured text and padding with a stable body origin."""
 
     def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
-        return BodyParameters()
+        return BodyParameters(
+            squareness=settings.oval_squareness
+            if self.capabilities.custom_enclosure and settings.oval_custom else 0)
 
     def enclosure_padding(self, settings: BubbleSettings) -> float:
         return settings.font_size * settings.padding / 100 + settings.outline / 2
 
     def enclose_text(self, width: float, height: float,
                      settings: BubbleSettings) -> QRectF:
+        if self.capabilities.custom_enclosure and settings.oval_custom:
+            horizontal = self.enclosure_padding(settings)
+            vertical = (settings.font_size * settings.oval_vertical_padding / 100
+                        + settings.outline / 2)
+            # Each quarter-curve's midpoint fits a padded text-box corner.
+            corner = 0.5 + 0.375 * oval_curve_control(settings.oval_squareness)
+            return QRectF(0, 0, max(1, (width + 4 * horizontal) / corner),
+                          max(1, (height + 2 * vertical) / corner))
         return self.body_rect(width, height, self.enclosure_padding(settings))
 
     @abstractmethod
@@ -93,7 +104,7 @@ class BubbleType(ABC):
 
 class OvalBubble(BubbleType):
     identifier = label = "Oval"
-    capabilities = BubbleCapabilities(oval=True)
+    capabilities = BubbleCapabilities(custom_enclosure=True)
 
     def body_rect(self, width: float, height: float, padding: float) -> QRectF:
         padded = _rectangular_enclosure(width, height, padding)
@@ -102,41 +113,9 @@ class OvalBubble(BubbleType):
         body_width = math.hypot(padded.width(), ratio * padded.height())
         return QRectF(0, 0, body_width, body_width / ratio)
 
-    @staticmethod
-    def _curve_control(squareness: int) -> float:
-        circle = 4 * (math.sqrt(2) - 1) / 3
-        return circle + (1 - circle) * squareness / 100
-
-    def enclose_text(self, width: float, height: float,
-                     settings: BubbleSettings) -> QRectF:
-        if not settings.oval_custom:
-            return super().enclose_text(width, height, settings)
-        horizontal = self.enclosure_padding(settings)
-        vertical = (settings.font_size * settings.oval_vertical_padding / 100
-                    + settings.outline / 2)
-        # Each quarter-curve's midpoint fits one corner of the padded text box.
-        corner = 0.5 + 0.375 * self._curve_control(settings.oval_squareness)
-        return QRectF(0, 0, max(1, (width + 4 * horizontal) / corner),
-                      max(1, (height + 2 * vertical) / corner))
-
-    def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
-        return BodyParameters(
-            squareness=settings.oval_squareness if settings.oval_custom else 0)
-
     def body_path(self, rect: QRectF,
                   parameters: BodyParameters = BodyParameters()) -> QPainterPath:
-        path = QPainterPath()
-        if parameters.squareness == 0:
-            path.addEllipse(rect)
-            return path
-        control = self._curve_control(parameters.squareness)
-        path.moveTo(1, 0)
-        path.cubicTo(1, control, control, 1, 0, 1)
-        path.cubicTo(-control, 1, -1, control, -1, 0)
-        path.cubicTo(-1, -control, -control, -1, 0, -1)
-        path.cubicTo(control, -1, 1, -control, 1, 0)
-        path.closeSubpath()
-        return ellipse_transform(rect).map(path)
+        return oval_path(rect, parameters.squareness)
 
 
 class RoundedBubble(BubbleType):
@@ -191,19 +170,19 @@ class SquareBubble(BubbleType):
 
 class ThoughtBubble(BubbleType):
     identifier = label = "Thought"
-    capabilities = BubbleCapabilities(thought=True)
+    capabilities = BubbleCapabilities(thought=True, custom_enclosure=True)
 
     def body_rect(self, width: float, height: float, padding: float) -> QRectF:
         return _elliptical_enclosure(width, height, padding)
 
     def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
-        return BodyParameters(irregularity=settings.thought_irregularity,
-                              seed=settings.thought_seed, nodes=settings.thought_nodes)
+        return replace(super().body_parameters(settings),
+                       irregularity=settings.thought_irregularity,
+                       seed=settings.thought_seed, nodes=settings.thought_nodes)
 
     def body_path(self, rect: QRectF,
                   parameters: BodyParameters = BodyParameters()) -> QPainterPath:
-        path = QPainterPath()
-        path.addEllipse(rect)
+        path = oval_path(rect, parameters.squareness)
         ellipse = ellipse_transform(rect)
         generator = random.Random(parameters.seed)
         amount = parameters.irregularity / 100
@@ -217,7 +196,9 @@ class ThoughtBubble(BubbleType):
             radius_y = 0.30 * lobe_scale * (1 + generator.uniform(-0.35, 0.5) * amount)
             rotation = generator.uniform(-55, 55) * amount
             lobe = ellipse_path(
-                QPointF(distance * math.cos(angle), distance * math.sin(angle)),
+                squared_ellipse_point(
+                    QPointF(distance * math.cos(angle), distance * math.sin(angle)),
+                    parameters.squareness),
                 radius_x, radius_y, rotation)
             path = path.united(ellipse.map(lobe))
         return path
@@ -232,7 +213,7 @@ class ThoughtBubble(BubbleType):
 
 class ShoutingBubble(BubbleType):
     identifier = label = "Shouting"
-    capabilities = BubbleCapabilities(shouting=True)
+    capabilities = BubbleCapabilities(shouting=True, custom_enclosure=True)
 
     def __init__(self, algorithm: ShoutingAlgorithm) -> None:
         self.algorithm = algorithm
@@ -241,14 +222,15 @@ class ShoutingBubble(BubbleType):
         return _elliptical_enclosure(width, height, padding)
 
     def body_parameters(self, settings: BubbleSettings) -> BodyParameters:
-        return BodyParameters(irregularity=settings.shout_irregularity,
-                              seed=settings.shout_seed, nodes=settings.shout_nodes)
+        return replace(super().body_parameters(settings),
+                       irregularity=settings.shout_irregularity,
+                       seed=settings.shout_seed, nodes=settings.shout_nodes)
 
     def body_path(self, rect: QRectF,
                   parameters: BodyParameters = BodyParameters()) -> QPainterPath:
         outline = self.algorithm.outline(
             parameters.nodes, parameters.irregularity, parameters.seed)
-        return outline.to_path(ellipse_transform(rect))
+        return outline.to_path(ellipse_transform(rect), parameters.squareness)
 
     def with_algorithm(self, algorithm: ShoutingAlgorithm) -> ShoutingBubble:
         return ShoutingBubble(algorithm)

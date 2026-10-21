@@ -638,7 +638,14 @@ class EditorTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Invalid padding"):
                     self.docker.validateSettings(settings)
 
-    def test_custom_oval_live_updates_and_reopens_without_changing_text_or_tail_lock(self):
+    def test_custom_shapes_live_update_and_reopen_without_changing_text_or_tail_lock(self):
+        for style in ("Oval", "Thought", "Shouting"):
+            with self.subTest(style=style):
+                self._assert_custom_shape_live_updates_and_reopens(style)
+                self.docker.stopEditing()
+
+    def _assert_custom_shape_live_updates_and_reopens(self, style):
+        self.docker.bubbleType.setCurrentText(style)
         self.docker.bubbleText.setPlainText("Damn Kara looks\nso hot now...")
         self.docker.autocenter.setChecked(False)
         self.docker.averageLineLengthSpinBox.setValue(0)

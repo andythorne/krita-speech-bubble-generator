@@ -15,7 +15,9 @@ from PyQt5.QtWidgets import QApplication
 from krita_speech_bubble_generator.bubbles.geometry import (
     body_path, bubble_path, path_data, tail_anchor, tail_tip,
 )
-from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES
+from krita_speech_bubble_generator.bubbles.registry import (
+    BUBBLE_TYPES, SHOUTING_ALGORITHMS,
+)
 from krita_speech_bubble_generator.bubbles.renderer import (
     BubbleRenderer, Geometry, RenderResult, automatic_speech_lines, get_speech_lines,
 )
@@ -328,23 +330,85 @@ class BubbleRendererTests(unittest.TestCase):
                                        inset.bottomLeft(), inset.bottomRight()):
                             self.assertTrue(geometry.body.contains(corner))
 
-    def test_custom_oval_options_do_not_affect_other_styles_or_disabled_ovals(self):
+    def test_custom_options_do_not_affect_unsupported_or_disabled_styles(self):
         for style in BUBBLE_TYPES:
             settings = replace(self.settings, style=style)
             original = self.renderer.geometry(settings)
             changed = replace(settings, oval_vertical_padding=0, oval_squareness=100)
-            if not BUBBLE_TYPES[style].capabilities.oval:
+            if not BUBBLE_TYPES[style].capabilities.custom_enclosure:
                 changed = replace(changed, oval_custom=True)
             geometry = self.renderer.geometry(changed)
             self.assertEqual(geometry.body_rect, original.body_rect)
             self.assertEqual(geometry.body, original.body)
             self.assertEqual(geometry.text_rect, original.text_rect)
 
-    def test_custom_oval_uses_actual_outline_for_locked_and_dragged_tails(self):
+    def test_thought_and_shouting_custom_padding_and_squareness_share_oval_sizing(self):
+        for style in ("Thought", "Shouting"):
+            with self.subTest(style=style):
+                settings = replace(
+                    self.settings, style=style, text="A long line of dialogue",
+                    line_length=0, oval_custom=True, oval_vertical_padding=0)
+                original = self.renderer.geometry(replace(settings, oval_custom=False))
+                ellipse = self.renderer.geometry(settings)
+                taller = self.renderer.geometry(replace(settings, oval_vertical_padding=150))
+                wider = self.renderer.geometry(replace(settings, padding=300))
+                squared = self.renderer.geometry(replace(settings, oval_squareness=100))
+                self.assertEqual(ellipse.body_rect.width(), taller.body_rect.width())
+                self.assertEqual(ellipse.body_rect.height(), wider.body_rect.height())
+                self.assertGreater(taller.body_rect.height(), ellipse.body_rect.height())
+                self.assertGreater(wider.body_rect.width(), ellipse.body_rect.width())
+                self.assertGreater(ellipse.body_rect.width() / ellipse.body_rect.height(), 2)
+                self.assertLess(squared.body_rect.width(), ellipse.body_rect.width())
+                self.assertLess(squared.body_rect.height(), ellipse.body_rect.height())
+                for geometry in (ellipse, taller, wider, squared):
+                    self.assertEqual(geometry.lines, original.lines)
+                    self.assertEqual(geometry.text_rect.size(), original.text_rect.size())
+                oval = self.renderer.geometry(replace(settings, style="Oval"))
+                self.assertEqual(ellipse.body_rect, oval.body_rect)
+
+    def test_custom_clouds_and_all_shouting_algorithms_enclose_the_padded_text(self):
+        variants = [("Thought", "Balanced")]
+        variants.extend(("Shouting", algorithm) for algorithm in SHOUTING_ALGORITHMS)
+        for style, algorithm in variants:
+            for nodes in (8, 24, 64):
+                for squareness in (0, 50, 100):
+                    for text, horizontal, vertical in (
+                            ("Wide dialogue with more words", 0, 0),
+                            ("One\nTwo\nThree\nFour", 0, 150),
+                            ("Hi", 150, 0)):
+                        with self.subTest(style=style, algorithm=algorithm, nodes=nodes,
+                                          squareness=squareness, text=text):
+                            settings = replace(
+                                self.settings, style=style, shout_shape=algorithm,
+                                text=text, line_length=0, oval_custom=True,
+                                padding=horizontal, oval_vertical_padding=vertical,
+                                oval_squareness=squareness,
+                                thought_nodes=nodes, shout_nodes=nodes,
+                                thought_irregularity=100, shout_irregularity=100,
+                                thought_seed=17, shout_seed=17)
+                            geometry = self.renderer.geometry(settings)
+                            dx = settings.font_size * horizontal / 100 * 2
+                            dy = settings.font_size * vertical / 100
+                            padded = QPainterPath()
+                            padded.addRect(geometry.text_rect.adjusted(
+                                -dx + 0.01, -dy + 0.01, dx - 0.01, dy - 0.01))
+                            self.assertTrue(geometry.body.contains(padded))
+                            self.assertEqual(self.renderer.geometry(settings).body,
+                                             geometry.body)
+
+    def test_custom_shapes_use_actual_outline_for_locked_and_dragged_tails(self):
+        variants = [("Oval", "Balanced"), ("Thought", "Balanced")]
+        variants.extend(("Shouting", algorithm) for algorithm in SHOUTING_ALGORITHMS)
+        for style, algorithm in variants:
+            with self.subTest(style=style, algorithm=algorithm):
+                self._assert_custom_shape_tail_geometry(style, algorithm)
+
+    def _assert_custom_shape_tail_geometry(self, style, algorithm):
         for squareness in (0, 50, 100):
             for locked in (False, True):
                 settings = replace(
-                    self.settings, text="Wide dialogue", line_length=0, oval_custom=True,
+                    self.settings, style=style, shout_shape=algorithm,
+                    text="Wide dialogue", line_length=0, oval_custom=True,
                     oval_vertical_padding=0, oval_squareness=squareness,
                     tail_length=43, lock_tail=locked, tail_curve=70)
                 geometry = self.renderer.geometry(settings)

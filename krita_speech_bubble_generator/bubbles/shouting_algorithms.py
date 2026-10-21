@@ -9,7 +9,7 @@ from typing import Callable, List, NamedTuple, Optional, Tuple, Union
 from PyQt5.QtCore import QPointF
 from PyQt5.QtGui import QPainterPath, QTransform
 
-from .geometry import validate_nodes
+from .geometry import squared_ellipse_point, validate_nodes
 
 
 OutlineSegment = Union[Tuple[QPointF], Tuple[QPointF, QPointF]]
@@ -22,17 +22,20 @@ class ShoutingOutline(NamedTuple):
     start: QPointF
     segments: OutlineSegments
 
-    def to_path(self, transform: Optional[QTransform] = None) -> QPainterPath:
+    def to_path(self, transform: Optional[QTransform] = None,
+                squareness: int = 0) -> QPainterPath:
         """Map the normalized commands before Qt converts quadratics to cubics."""
         transform = QTransform() if transform is None else transform
         path = QPainterPath()
         start, segments = self
-        path.moveTo(transform.map(start))
+        path.moveTo(transform.map(squared_ellipse_point(start, squareness)))
         for segment in segments:
             if len(segment) == 1:
-                path.lineTo(transform.map(segment[0]))
+                path.lineTo(transform.map(squared_ellipse_point(segment[0], squareness)))
             else:
-                path.quadTo(transform.map(segment[0]), transform.map(segment[1]))
+                path.quadTo(
+                    transform.map(squared_ellipse_point(segment[0], squareness)),
+                    transform.map(squared_ellipse_point(segment[1], squareness)))
         path.closeSubpath()
         return path
 

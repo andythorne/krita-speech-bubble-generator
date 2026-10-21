@@ -115,6 +115,25 @@ class GeometryStrategyTests(unittest.TestCase):
         self.assertIs(balanced.algorithm, SHOUTING_ALGORITHMS["Balanced"])
         self.assertIs(expressive.algorithm, SHOUTING_ALGORITHMS["Expressive"])
 
+    def test_squareness_shapes_clouds_and_spikes_without_reseeding(self):
+        rect = QRectF(0, 0, 240, 100)
+        variants = [("Thought", "Balanced")]
+        variants.extend(("Shouting", algorithm) for algorithm in SHOUTING_ALGORITHMS)
+        for style, algorithm in variants:
+            for nodes in (8, 24, 64):
+                with self.subTest(style=style, algorithm=algorithm, nodes=nodes):
+                    bubble = resolve_bubble(style, algorithm)
+                    parameters = BodyParameters(seed=17, irregularity=100, nodes=nodes)
+                    original = bubble.body_path(rect, parameters)
+                    squared_parameters = BodyParameters(
+                        seed=17, irregularity=100, nodes=nodes, squareness=100)
+                    squared = bubble.body_path(rect, squared_parameters)
+                    self.assertNotEqual(squared, original)
+                    self.assertEqual(bubble.body_path(rect, squared_parameters), squared)
+                    self.assertEqual(bubble.body_path(rect, parameters), original)
+                    if bubble.capabilities.shouting:
+                        self.assertEqual(squared.elementCount(), original.elementCount())
+
     def test_types_share_enclosure_and_tail_contracts(self):
         for bubble in BUBBLE_TYPES.values():
             with self.subTest(style=bubble.identifier):

@@ -58,6 +58,46 @@ def ellipse_transform(rect: QRectF) -> QTransform:
         rect.width() / 2, rect.height() / 2)
 
 
+def oval_curve_control(squareness: int) -> float:
+    circle = 4 * (math.sqrt(2) - 1) / 3
+    return circle + (1 - circle) * squareness / 100
+
+
+def oval_path(rect: QRectF, squareness: int = 0) -> QPainterPath:
+    path = QPainterPath()
+    if squareness == 0:
+        path.addEllipse(rect)
+        return path
+    control = oval_curve_control(squareness)
+    path.moveTo(1, 0)
+    path.cubicTo(1, control, control, 1, 0, 1)
+    path.cubicTo(-control, 1, -1, control, -1, 0)
+    path.cubicTo(-1, -control, -control, -1, 0, -1)
+    path.cubicTo(control, -1, 1, -control, 1, 0)
+    path.closeSubpath()
+    return ellipse_transform(rect).map(path)
+
+
+def squared_ellipse_point(point: QPointF, squareness: int) -> QPointF:
+    """Reshape a contour point, retaining its angle and radial variation."""
+    if squareness == 0 or point.isNull():
+        return point
+    x, y = abs(point.x()), abs(point.y())
+    control = oval_curve_control(squareness)
+    low, high = 0.0, 1.0
+    curve_x, curve_y = 1.0, 0.0
+    for _ in range(32):
+        t = (low + high) / 2
+        u = 1 - t
+        curve_x = u ** 3 + 3 * u * u * t + 3 * u * t * t * control
+        curve_y = 3 * u * u * t * control + 3 * u * t * t + t ** 3
+        if curve_y * x < curve_x * y:
+            low = t
+        else:
+            high = t
+    return point * math.hypot(curve_x, curve_y)
+
+
 def ellipse_path(center: QPointF, radius_x: float, radius_y: float,
                  angle: float = 0) -> QPainterPath:
     path = QPainterPath()

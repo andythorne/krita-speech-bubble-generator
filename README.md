@@ -51,8 +51,10 @@ bubble loads its own settings.
   italic, or use **Ctrl+B** and **Ctrl+I**. Automatic wrapping is on by default;
   use line breaks or **Characters per line** to control it yourself.
 - **Bubble:** Choose Oval, Rounded, Square, Thought or Shouting. Adjust padding,
-  outline and fill. Ovals can use independent horizontal and vertical padding;
-  shouting bubbles offer several spike shapes and adjustable nodes.
+  outline and fill. For Oval, Thought and Shouting, enable **Customise shape**
+  for independent horizontal and vertical padding and adjustable squareness.
+  Turn it off to restore the original proportions. Shouting bubbles also offer
+  several spike shapes and adjustable nodes.
 - **Tail:** Use the compass for set directions or drag for any angle. **Lock
   tail length** keeps the length fixed while aiming; turn it off to change both
   direction and length. **Curve** bends the tail. Thought trails follow the
