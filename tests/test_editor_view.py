@@ -5,13 +5,13 @@ import math
 import unittest
 from unittest.mock import patch
 
-from PyQt5.QtCore import QMimeData, QPointF, QRectF, Qt
-from PyQt5.QtGui import QColor, QFont, QTextCursor
+from PyQt5.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt
+from PyQt5.QtGui import QColor, QFont, QTextCursor, QTransform
 from PyQt5.QtTest import QSignalSpy, QTest
-from PyQt5.QtWidgets import QLabel
+from PyQt5.QtWidgets import QGroupBox, QLabel
 
 from fake_krita import APP
-from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
+from krita_speech_bubble_generator.bubbles.registry import BUBBLE_STYLES, SHAPES, SHOUTING_ALGORITHMS
 from krita_speech_bubble_generator.bubbles.renderer import BubbleRenderer
 from krita_speech_bubble_generator.bubbles.settings import (
     INTEGER_RANGES, BubbleSettings, TextStyle,
@@ -122,7 +122,10 @@ class EditorViewTests(unittest.TestCase):
     def test_options_and_control_order_come_from_ordered_registries(self):
         self.assertEqual(
             [self.view.bubbleType.itemText(i) for i in range(self.view.bubbleType.count())],
-            list(BUBBLE_TYPES))
+            list(BUBBLE_STYLES))
+        self.assertEqual(
+            [self.view.bubbleShape.itemText(i) for i in range(self.view.bubbleShape.count())],
+            list(SHAPES))
         self.assertEqual(
             [self.view.shoutingShape.itemText(i) for i in range(self.view.shoutingShape.count())],
             list(SHOUTING_ALGORITHMS))
@@ -157,6 +160,7 @@ class EditorViewTests(unittest.TestCase):
             (self.view.tailTab, (
                 self.view.tailCompass, self.view.lockTailLength,
                 self.view.tailSlider, self.view.tailSpinBox, self.view.thoughtSizeGroup,
+                self.view.thoughtBlobsGroup,
                 self.view.tailCurveSlider, self.view.tailCurveSpinBox,
                 self.view.tailCurveDirection)),
             (self.view.importTab, (
@@ -236,20 +240,20 @@ class EditorViewTests(unittest.TestCase):
         defaults = BubbleSettings()
         for field, control in self.view._numbers.items():
             with self.subTest(field=field):
-                bounds = ((0, defaults.font_size * 10) if field == "tail_length"
-                          else INTEGER_RANGES[field])
+                bounds = INTEGER_RANGES[field]
                 self.assertEqual((control.minimum(), control.maximum()), bounds)
                 self.assertEqual(control.value(), getattr(defaults, field))
 
     def test_initial_style_is_oval(self):
-        self.assertEqual(self.view.bubbleType.currentText(), "Oval")
-        self.assertEqual(self.view.initial_settings().style, "Oval")
+        self.assertEqual(self.view.bubbleType.currentText(), "Sharp")
+        self.assertEqual(self.view.initial_settings().shape, "Oval")
+        self.assertEqual(self.view.initial_settings().wrapping, "Standard")
 
-    def test_batch_load_suppresses_all_semantic_edits_and_establishes_ranges_first(self):
+    def test_batch_load_suppresses_all_semantic_edits_and_preserves_absolute_tail_length(self):
         edits = QSignalSpy(self.view.edited)
         original = self.view.initial_settings()
         loaded = replace(
-            original, style="Thought", text="Stored text", font_size=70,
+            original, style="Thought", text="Stored text", font_size=14,
             tail_length=650, padding=235, lock_tail=False, autocenter=False,
             line_length=24, shout_shape="Expressive", shout_nodes=37, thought_nodes=29,
             shout_irregularity=85, thought_irregularity=75, shout_seed=1729, thought_seed=2718,
@@ -260,7 +264,7 @@ class EditorViewTests(unittest.TestCase):
         result = self.view.load_settings(loaded)
         self.assertEqual(result, loaded)
         self.assertEqual(len(edits), 0)
-        self.assertEqual(self.view.tailSlider.maximum(), 700)
+        self.assertEqual(self.view.tailSlider.maximum(), 990)
         self.assertEqual(self.view.tailSpinBox.value(), 650)
         self.assertFalse(self.view.tailLengthControls.isHidden())
         self.assertFalse(self.view.tailLengthControls.isEnabled())
@@ -298,7 +302,9 @@ class EditorViewTests(unittest.TestCase):
         enabled = replace(initial, oval_custom=True)
         self.assertEqual(list(edits), [[enabled, ("oval_custom",)]])
         self.assertTrue(self.view.ovalVerticalPaddingSpinBox.isEnabled())
-        self.assertEqual(self.view.paddingGroup.title(), "Horizontal padding")
+        self.assertEqual(self.view.paddingGroup.title(), "Padding")
+        self.assertTrue(self.view.paddingGroup.isHidden())
+        self.assertTrue(self.view.advancedPadding.isAncestorOf(self.view.paddingSpinBox))
         self.view.ovalVerticalPaddingSlider.setValue(20)
         padded = replace(enabled, oval_vertical_padding=20)
         self.assertEqual(edits[1], [padded, ("oval_vertical_padding",)])
@@ -308,7 +314,10 @@ class EditorViewTests(unittest.TestCase):
         self.assertEqual(edits[2], [squared, ("oval_squareness",)])
         self.assertEqual(self.view.ovalSquarenessSlider.value(), 65)
         self.view.ovalGroup.setChecked(False)
-        self.assertEqual(edits[3], [replace(squared, oval_custom=False), ("oval_custom",)])
+        self.assertEqual(edits[3], [
+            replace(squared, oval_custom=False, oval_vertical_padding=initial.padding,
+                    oval_squareness=0),
+            ("oval_custom", "oval_vertical_padding", "oval_squareness")])
         self.assertEqual(self.view.paddingGroup.title(), "Padding")
         self.assertFalse(self.view.ovalSquarenessSpinBox.isEnabled())
 
@@ -316,22 +325,108 @@ class EditorViewTests(unittest.TestCase):
         initial = replace(self.view.initial_settings(), oval_custom=True,
                           oval_vertical_padding=25, oval_squareness=80)
         self.view.load_settings(initial)
-        for style in BUBBLE_TYPES:
+        for style in BUBBLE_STYLES:
             self.view.bubbleType.setCurrentText(style)
-            self.assertEqual(self.view.ovalGroup.isHidden(),
-                             not BUBBLE_TYPES[style].capabilities.custom_enclosure)
+            self.assertFalse(self.view.ovalGroup.isHidden())
             self.assertEqual(self.view.initial_settings(), replace(initial, style=style))
-            self.assertEqual(self.view.paddingGroup.title(),
-                             "Horizontal padding"
-                             if BUBBLE_TYPES[style].capabilities.custom_enclosure
-                             else "Padding")
+            self.assertTrue(self.view.paddingGroup.isHidden())
+            self.assertFalse(self.view.advancedPadding.isHidden())
         edits = QSignalSpy(self.view.edited)
         reflected = replace(initial, oval_vertical_padding=0, oval_squareness=50)
         self.view.reflect_settings(reflected)
         self.assertEqual(self.view.initial_settings(), reflected)
         self.assertEqual(len(edits), 0)
         self.assertFalse(self.view.ovalGroup.isHidden())
-        self.assertEqual(self.view.paddingGroup.title(), "Horizontal padding")
+        self.assertTrue(self.view.paddingGroup.isHidden())
+        self.assertFalse(self.view.advancedPadding.isHidden())
+
+    def test_advanced_padding_hides_whole_panel_and_reuses_horizontal_control_silently(self):
+        self.view.show()
+        self.view.optionsTabs.setCurrentWidget(self.view.bubbleTab)
+        APP.processEvents()
+        edits = QSignalSpy(self.view.edited)
+        initial = self.view.initial_settings()
+        for shape in SHAPES:
+            for custom in (True, False, True, False):
+                with self.subTest(shape=shape, custom=custom):
+                    settings = replace(initial, shape=shape, oval_custom=custom,
+                                       padding=75, oval_vertical_padding=25, oval_squareness=80)
+                    self.assertEqual(self.view.load_settings(settings), settings)
+                    APP.processEvents()
+                    self.assertTrue(self.view.ovalGroup.isVisible())
+                    self.assertEqual(self.view.advancedPadding.isVisible(), custom)
+                    self.assertEqual(self.view.paddingGroup.isVisible(), not custom)
+                    self.assertEqual(self.view.paddingGroup.title(), "Padding")
+                    self.assertTrue(self.view.paddingSpinBox.isVisible())
+                    self.assertEqual(
+                        self.view.advancedPadding.isAncestorOf(self.view.paddingSpinBox),
+                        custom)
+                    self.assertEqual(self.view.ovalVerticalPaddingSpinBox.isVisible(), custom)
+                    self.assertEqual(self.view.squarenessControls.isVisible(),
+                                     custom and SHAPES[shape].capabilities.squareness)
+        self.assertEqual(len(edits), 0)
+        self.view.ovalGroup.setChecked(True)
+        self.view.paddingSpinBox.setValue(90)
+        self.assertEqual(edits[-1][1], ("padding",))
+        self.assertEqual(self.view.initial_settings().oval_vertical_padding, 25)
+        self.view.ovalGroup.setChecked(False)
+        self.assertEqual(edits[-1][1],
+                         ("oval_custom", "oval_vertical_padding", "oval_squareness"))
+        self.assertEqual(self.view.initial_settings().oval_vertical_padding, 90)
+        self.assertEqual(self.view.initial_settings().oval_squareness, 0)
+        self.view.paddingSlider.setValue(120)
+        self.assertEqual(edits[-1][1], ("padding", "oval_vertical_padding"))
+        self.assertEqual(self.view.initial_settings().oval_vertical_padding, 120)
+
+    def test_padding_panels_have_peer_rows_below_a_stationary_toggle(self):
+        self.view.resize(700, 1000)
+        self.view.optionsTabs.setCurrentWidget(self.view.bubbleTab)
+        self.view.show()
+        APP.processEvents()
+        toggle = self.view.ovalGroup
+        bubble_layout = self.view.bubbleTab.layout()
+        self.assertIs(toggle.parentWidget(), self.view.bubbleTab)
+        for panel in (self.view.paddingGroup, self.view.advancedPadding):
+            self.assertLess(bubble_layout.indexOf(toggle), bubble_layout.indexOf(panel))
+        top = toggle.mapTo(self.view.bubbleTab, QPoint()).y()
+        view_top = toggle.mapTo(self.view, QPoint()).y()
+        edits = QSignalSpy(self.view.edited)
+        initial = self.view.initial_settings()
+
+        for edit_count, custom in enumerate((True, False, True, False), 1):
+            with self.subTest(custom=custom):
+                toggle.click()
+                APP.processEvents()
+                self.assertEqual(toggle.isChecked(), custom)
+                self.assertTrue(toggle.isVisible())
+                self.assertTrue(toggle.isEnabled())
+                self.assertEqual(toggle.mapTo(self.view.bubbleTab, QPoint()).y(), top)
+                self.assertEqual(toggle.mapTo(self.view, QPoint()).y(), view_top)
+                panel = self.view.advancedPadding if custom else self.view.paddingGroup
+                self.assertTrue(panel.isVisible())
+                self.assertLess(toggle.geometry().bottom(), panel.geometry().top())
+                self.assertEqual(self.view.advancedPadding.isVisible(), custom)
+                self.assertEqual(self.view.paddingGroup.isVisible(), not custom)
+                self.assertEqual(len(edits), edit_count)
+                fields = (("oval_custom",) if custom else
+                          ("oval_custom", "oval_vertical_padding", "oval_squareness"))
+                expected = replace(initial, oval_custom=custom)
+                self.assertEqual(edits[-1], [expected, fields])
+                self.assertEqual(self.view.paddingSlider.value(), initial.padding)
+                self.assertEqual(self.view.paddingSpinBox.value(), initial.padding)
+                if custom:
+                    advanced = self.view.advancedPadding
+                    self.assertEqual(advanced.findChildren(QGroupBox), [])
+                    rows = (self.view.paddingControls, self.view.verticalPaddingControls)
+                    for row in rows:
+                        self.assertIs(row.parentWidget(), advanced)
+                    self.assertIs(self.view.paddingSpinBox.parentWidget(), rows[0])
+                    self.assertIs(self.view.ovalVerticalPaddingSpinBox.parentWidget(), rows[1])
+                    layout = advanced.layout()
+                    self.assertEqual(layout.itemAt(0).widget().text(), "Horizontal padding")
+                    self.assertIs(layout.itemAt(1).widget(), rows[0])
+                    self.assertEqual(layout.itemAt(2).widget().text(), "Vertical padding")
+                    self.assertIs(layout.itemAt(3).widget(), rows[1])
 
     def test_tail_curve_controls_emit_snapshots_without_changing_length_or_seeds(self):
         initial = replace(
@@ -354,6 +449,143 @@ class EditorViewTests(unittest.TestCase):
         self.assertEqual(self.view.initial_settings(), reflected)
         self.assertEqual(len(edits), 3)
 
+    def test_thought_blob_count_controls_follow_style_and_emit_one_snapshot(self):
+        self.assertEqual(self.view.thoughtBlobsSpinBox.value(), 3)
+        self.assertTrue(self.view.thoughtBlobsGroup.isHidden())
+        self.assertFalse(self.view.thoughtBlobsSpinBox.isEnabled())
+        initial = replace(self.view.initial_settings(), style="Thought", tail_length=85,
+                          thought_seed=1729, shout_seed=2718)
+        self.view.load_settings(initial)
+        edits = QSignalSpy(self.view.edited)
+        self.assertFalse(self.view.thoughtBlobsGroup.isHidden())
+        self.assertTrue(self.view.thoughtBlobsSpinBox.isEnabled())
+        self.assertEqual((self.view.thoughtBlobsSpinBox.minimum(),
+                          self.view.thoughtBlobsSpinBox.maximum()), (1, 10))
+        self.view.thoughtBlobsSlider.setValue(7)
+        settings = replace(initial, thought_blobs=7)
+        self.assertEqual(list(edits), [[settings, ("thought_blobs",)]])
+        self.assertEqual(self.view.thoughtBlobsSpinBox.value(), 7)
+        self.view.thoughtBlobsSpinBox.setValue(10)
+        settings = replace(settings, thought_blobs=10)
+        self.assertEqual(edits[-1], [settings, ("thought_blobs",)])
+        self.assertEqual(self.view.thoughtBlobsSlider.value(), 10)
+        self.assertEqual(len(edits), 2)
+        for advanced in (False, True):
+            for enabled in (False, True):
+                loaded = replace(settings, tail_advanced=advanced, tail_enabled=enabled)
+                for bind in (self.view.load_settings, self.view.reflect_settings):
+                    self.assertEqual(bind(loaded), loaded)
+                    self.assertEqual(self.view.thoughtBlobsSpinBox.isEnabled(), enabled)
+        self.assertEqual(len(edits), 2)
+        self.view.bubbleType.setCurrentText("Sharp")
+        self.assertTrue(self.view.thoughtBlobsGroup.isHidden())
+        self.assertFalse(self.view.thoughtBlobsSpinBox.isEnabled())
+        self.assertEqual(self.view.initial_settings().thought_blobs, 10)
+
+    def test_tail_enable_and_advanced_controls_preserve_settings_and_reflect_mode(self):
+        initial = replace(
+            self.view.initial_settings(), tail_length=85, tail_angle=-0.3, tail_curve=60,
+            tail_start_angle=-0.5, tail_end_x=200.5, tail_end_y=60, lock_tail=True)
+        self.view.load_settings(initial)
+        edits = QSignalSpy(self.view.edited)
+        self.view.tailAdvanced.click()
+        advanced = replace(initial, tail_advanced=True)
+        self.assertEqual(list(edits), [[advanced, ("tail_advanced",)]])
+        self.assertFalse(self.view.lockTailLength.isEnabled())
+        self.assertTrue(self.view.lockTailLength.isChecked())
+        self.assertFalse(self.view.tailSpinBox.isEnabled())
+        self.assertFalse(self.view.tailCompass.isEnabled())
+        self.assertFalse(self.view.tailAdvancedInstructions.isHidden())
+        self.assertTrue(self.view.tailCurveSpinBox.isEnabled())
+        self.view.tailEnabled.click()
+        disabled = replace(advanced, tail_enabled=False)
+        self.assertEqual(edits[-1], [disabled, ("tail_enabled",)])
+        self.assertFalse(self.view.tailAdvanced.isEnabled())
+        self.assertFalse(self.view.tailCurveSpinBox.isEnabled())
+        self.view.tailEnabled.click()
+        self.assertEqual(self.view.initial_settings(), advanced)
+        self.assertTrue(self.view.tailAdvanced.isEnabled())
+        self.assertFalse(self.view.lockTailLength.isEnabled())
+        self.view.tailAdvanced.click()
+        self.assertEqual(self.view.initial_settings(), initial)
+        self.assertTrue(self.view.lockTailLength.isEnabled())
+        self.assertTrue(self.view.tailSpinBox.isEnabled())
+        self.assertTrue(self.view.tailCompass.isEnabled())
+        self.assertTrue(self.view.tailAdvancedInstructions.isHidden())
+        count = len(edits)
+        for bind in (self.view.load_settings, self.view.reflect_settings):
+            self.assertEqual(bind(disabled), disabled)
+            self.assertFalse(self.view.tailControls.isEnabled())
+            self.assertEqual(bind(advanced), advanced)
+            self.assertFalse(self.view.lockTailLength.isEnabled())
+            self.assertEqual(bind(initial), initial)
+            self.assertTrue(self.view.lockTailLength.isEnabled())
+        self.assertEqual(len(edits), count)
+
+    def test_advanced_preview_mouse_drags_route_each_handle_with_a_fixed_drag_frame(self):
+        renderer = BubbleRenderer()
+        initial = replace(
+            self.view.initial_settings(), tail_length=85, tail_advanced=True, lock_tail=True)
+        self.view.load_settings(initial)
+        preview = self.view.preview
+        preview.setContext(transform=QTransform().translate(250, 100).rotate(20).scale(1.4, 0.8))
+        def refresh(settings):
+            self.view.reflect_settings(settings)
+            self.view.show_render(renderer.render(settings, preview=True))
+        self.view.tail_start_moved.connect(
+            lambda point: refresh(renderer.move_tail_start(self.view.initial_settings(), point)))
+        self.view.tail_moved.connect(
+            lambda point: refresh(renderer.move_tail(self.view.initial_settings(), point)))
+        self.view.show()
+        refresh(initial)
+        APP.processEvents()
+        start_edits = QSignalSpy(self.view.tail_start_moved)
+        end_edits = QSignalSpy(self.view.tail_moved)
+        fixed_tip = QPointF(preview.tip)
+        initial_angle = initial.tail_angle
+        center = renderer.geometry(initial).body_rect.center()
+        for is_start, point in ((True, center + QPointF(200, -30)),
+                                (False, center + QPointF(200, 40))):
+            handle = preview.tail_start if is_start else preview.tip
+            start = preview.toWidget(handle, preview.view_box).toPoint()
+            frame = QRectF(preview.view_box)
+            end = preview.toWidget(point, frame).toPoint()
+            expected_point = preview.toBubble(QPointF(end), frame)
+            QTest.mousePress(preview, Qt.LeftButton, pos=start)
+            self.assertTrue(preview.dragging)
+            self.assertEqual(preview.drag_start, is_start)
+            QTest.mouseMove(preview, end)
+            self.assertEqual(preview.view_box, frame)
+            QTest.mouseRelease(preview, Qt.LeftButton, pos=end)
+            self.assertFalse(preview.dragging)
+            if is_start:
+                self.assertEqual(preview.tip, fixed_tip)
+                offset = expected_point - center
+                self.assertAlmostEqual(self.view.initial_settings().tail_start_angle,
+                                       math.atan2(offset.y(), offset.x()))
+                self.assertEqual(len(end_edits), 0)
+            else:
+                self.assertLess((preview.tip - expected_point).manhattanLength(), 1e-6)
+        self.assertGreater(len(start_edits), 0)
+        self.assertGreater(len(end_edits), 0)
+        self.assertEqual(self.view.initial_settings().tail_length, 85)
+        self.assertEqual(self.view.initial_settings().tail_angle, initial_angle)
+        self.assertTrue(self.view.initial_settings().lock_tail)
+
+    def test_disabling_tail_during_a_drag_clears_handles_and_cancels_dragging(self):
+        renderer = BubbleRenderer()
+        settings = replace(self.view.initial_settings(), tail_advanced=True, tail_length=85)
+        self.view.show_render(renderer.render(settings, preview=True))
+        preview = self.view.preview
+        preview.dragging = True
+        preview.drag_start = True
+        preview.drag_view_box = QRectF(preview.view_box)
+        self.view.show_render(renderer.render(replace(settings, tail_enabled=False), preview=True))
+        self.assertFalse(self.view.is_dragging())
+        self.assertIsNone(preview.drag_view_box)
+        self.assertIsNone(preview.tip)
+        self.assertIsNone(preview.tail_start)
+
     def test_user_edit_emits_one_snapshot_and_intent_but_never_generates_seeds(self):
         initial = replace(self.view.initial_settings(), shout_seed=17, thought_seed=29)
         self.view.load_settings(initial)
@@ -365,14 +597,20 @@ class EditorViewTests(unittest.TestCase):
         self.assertEqual(settings.shout_irregularity, 80)
         self.assertEqual((settings.shout_seed, settings.thought_seed), (17, 29))
 
-    def test_font_size_change_clamps_tail_and_emits_only_the_final_consistent_snapshot(self):
-        self.view.load_settings(replace(self.view.initial_settings(), font_size=70, tail_length=650))
-        edits = QSignalSpy(self.view.edited)
-        self.view.speechFontSize.setValue(10)
-        self.assertEqual(len(edits), 1)
-        settings, fields = edits[0]
-        self.assertEqual((settings.font_size, settings.tail_length), (10, 100))
-        self.assertEqual(fields, ("font_size", "tail_length"))
+    def test_font_size_change_preserves_tail_and_emits_only_font_size(self):
+        for locked in (True, False):
+            with self.subTest(locked=locked):
+                original = replace(self.view.initial_settings(), font_size=65,
+                                   tail_length=650, tail_angle=-1.2, lock_tail=locked)
+                self.view.load_settings(original)
+                edits = QSignalSpy(self.view.edited)
+                self.view.speechFontSize.setValue(10)
+                self.assertEqual(list(edits), [[replace(original, font_size=10),
+                                               ("font_size",)]])
+                self.assertEqual(self.view.tailSpinBox.value(), 650)
+                self.assertEqual(self.view.tailSlider.value(), 650)
+                self.assertEqual(self.view.tailSpinBox.maximum(), 990)
+                self.assertEqual(self.view.tailSlider.maximum(), 990)
 
     def test_compass_directions_emit_only_angle_and_preserve_all_other_settings(self):
         directions = {
@@ -380,7 +618,7 @@ class EditorViewTests(unittest.TestCase):
             "SE": math.pi / 4, "S": math.pi / 2, "SW": 3 * math.pi / 4,
             "W": math.pi, "NW": -3 * math.pi / 4,
         }
-        for style in BUBBLE_TYPES:
+        for style in BUBBLE_STYLES:
             for length, locked in ((0, True), (0, False), (65, True), (65, False)):
                 for direction, angle in directions.items():
                     with self.subTest(style=style, length=length, locked=locked,

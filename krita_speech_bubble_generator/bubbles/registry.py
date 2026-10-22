@@ -5,7 +5,9 @@ from typing import Iterable, Mapping, Protocol, TypeVar
 
 from .types import (
     BubbleType, OvalBubble, RoundedBubble, ShoutingBubble, SquareBubble, ThoughtBubble,
+    SharpBubble,
 )
+from .shapes import BubbleShape, OvalShape, SquareShape, TracingShape
 from .shouting_algorithms import (
     AngularShouting, BalancedShouting, ExpressiveShouting, PunchyShouting,
     ShoutingAlgorithm,
@@ -38,6 +40,13 @@ BUBBLE_TYPES: OrderedDict[str, BubbleType] = build_registry((
     OvalBubble(), RoundedBubble(), SquareBubble(), ThoughtBubble(),
     ShoutingBubble(SHOUTING_ALGORITHMS["Balanced"]),
 ))
+SHAPES: OrderedDict[str, BubbleShape] = build_registry((
+    OvalShape(), SquareShape(), TracingShape(),
+))
+BUBBLE_STYLES: OrderedDict[str, BubbleType] = build_registry((
+    SharpBubble(), RoundedBubble(), ThoughtBubble(),
+    ShoutingBubble(SHOUTING_ALGORITHMS["Balanced"]),
+))
 
 
 def _resolve(registry: Mapping[str, Implementation], key: object,
@@ -50,9 +59,11 @@ def _resolve(registry: Mapping[str, Implementation], key: object,
         raise ValueError("Unknown {}: {}".format(description, key)) from None
 
 
-def resolve_bubble(style: object, shout_shape: object = "Balanced") -> BubbleType:
-    bubble = _resolve(BUBBLE_TYPES, style, "bubble style")
+def resolve_bubble(style: object, shout_shape: object = "Balanced",
+                   shape: object = None) -> BubbleType:
+    registry = {**BUBBLE_TYPES, **BUBBLE_STYLES} if shape is None else BUBBLE_STYLES
+    bubble = _resolve(registry, style, "bubble style")
     if bubble.capabilities.shouting:
-        return bubble.with_algorithm(
+        bubble = bubble.with_algorithm(
             _resolve(SHOUTING_ALGORITHMS, shout_shape, "shouting shape"))
-    return bubble
+    return bubble if shape is None else bubble.with_shape(_resolve(SHAPES, shape, "bubble shape"))

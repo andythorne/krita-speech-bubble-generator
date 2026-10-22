@@ -22,6 +22,7 @@ from krita_speech_bubble_generator.editor.state import (
 class SubstituteView(QObject):
     edited = pyqtSignal(object, tuple)
     tail_moved = pyqtSignal(object)
+    tail_start_moved = pyqtSignal(object)
     page_requested = pyqtSignal(bool)
     new_requested = pyqtSignal()
     import_requested = pyqtSignal()
@@ -87,11 +88,16 @@ class SubstituteRenderer:
 
     def render(self, settings, preview=False):
         self.calls.append((settings, preview))
-        return SimpleNamespace(svg=settings.text, view_box=QRectF(0, 0, 20, 10), tip=None)
+        return SimpleNamespace(svg=settings.text, view_box=QRectF(0, 0, 20, 10),
+                               tip=None, tail_start=None)
 
     def move_tail(self, settings, point):
         self.tail_calls.append((settings, point))
         return replace(settings, tail_angle=0.7, tail_length=23)
+
+    def move_tail_start(self, settings, point):
+        self.tail_calls.append((settings, point))
+        return replace(settings, tail_start_angle=-0.4)
 
 
 class SubstituteGateway:
@@ -208,9 +214,13 @@ class PresenterTests(unittest.TestCase):
 
     def test_style_clipboard_survives_repeated_pastes_selection_and_new_bubbles(self):
         self.assertFalse(self.view.style_available)
-        self.bind("source", style="Shouting", fill="#123456", outline=7,
+        self.bind("source", shape="Tracing", style="Shouting", wrapping="Diamond",
+                  fill="#123456", outline=7,
                   padding=95, shout_shape="Expressive", shout_nodes=37,
                   shout_irregularity=90, thought_irregularity=80,
+                  thought_nodes=29, thought_size=275, shout_seed=42, thought_seed=53,
+                  oval_custom=True, oval_vertical_padding=25, oval_squareness=80,
+                  autocenter=False, line_length=24, optical_center=True,
                   tail_curve=75, tail_curve_direction="Down")
         source = self.presenter.state.draft
         self.view.copy_style_requested.emit()
@@ -226,6 +236,12 @@ class PresenterTests(unittest.TestCase):
                 expected = self.presenter.state.draft.with_style_from(source)
                 self.view.paste_style_requested.emit()
                 self.assertEqual(self.presenter.state.draft, expected)
+                self.assertEqual(
+                    (expected.shout_seed, expected.thought_seed, expected.thought_size),
+                    (42, 53, 275))
+                self.assertEqual(
+                    (expected.text, expected.tail_angle, expected.tail_length, expected.lock_tail),
+                    (name, -1.2, 70, False))
                 self.assertEqual(self.view.settings, expected)
                 self.assertEqual(self.presenter.state.pending.target, target)
                 self.assertTrue(self.presenter.apply_live_update())
@@ -261,7 +277,8 @@ class PresenterTests(unittest.TestCase):
         self.view.copy_style_requested.emit()
         self.edit(style="Thought", padding=300)
         self.view.paste_style_requested.emit()
-        self.assertEqual(self.presenter.state.draft.style, "Square")
+        self.assertEqual(self.presenter.state.draft.style, "Sharp")
+        self.assertEqual(self.presenter.state.draft.shape, "Square")
         self.assertEqual(self.presenter.state.draft.padding, 25)
 
     def test_initial_seeds_are_injected_and_all_timers_have_gui_ownership(self):
@@ -279,9 +296,10 @@ class PresenterTests(unittest.TestCase):
             self.assertFalse(timer.isActive())
         self.assertEqual(self.gateway.writes, [])
 
-    def test_preferences_restore_every_bubble_option_except_default_style(self):
+    def test_preferences_restore_every_option_except_default_shape_and_style(self):
         saved = EditorPreferences(
-            replace(BubbleSettings(), style="Thought", text="Remember this dialogue",
+            replace(BubbleSettings(), shape="Tracing", style="Thought", wrapping="Diamond",
+                    text="Remember this dialogue",
                     padding=75, font_size=22, tail_length=63, lock_tail=False,
                     thought_seed=101, shout_seed=202),
             background_enabled=False, new_layer=False)
@@ -323,13 +341,13 @@ class PresenterTests(unittest.TestCase):
             "Cannot restore editor options: Invalid preferences",
             "Cannot save editor options: Read-only preferences"])
 
-    def test_leaving_existing_non_oval_bubble_restores_oval_new_bubble_default(self):
+    def test_leaving_existing_bubble_keeps_current_appearance_for_new_drafts(self):
         loaded = self.bind(style="Shouting", padding=95)
         self.assertEqual(self.view.settings.style, "Shouting")
         self.gateway.selection = Selection(self.gateway.document)
         self.presenter.sync_selection()
         self.assertIsNone(self.presenter.state.target)
-        self.assertEqual(self.view.settings, replace(loaded.settings, style="Oval"))
+        self.assertEqual(self.view.settings, loaded.settings)
         self.edit(style="Thought")
         self.presenter.sync_selection(force=True)
         self.assertEqual(self.view.settings.style, "Thought")
@@ -422,6 +440,16 @@ class PresenterTests(unittest.TestCase):
         self.view.tail_moved.emit(QPointF(10, 20))
         self.view.load_settings.assert_not_called()
         self.assertEqual(self.view.settings.tail_length, 23)
+
+    def test_tail_start_edits_follow_the_same_targeted_pending_write_path(self):
+        loaded = self.bind(tail_advanced=True)
+        seeds = (self.view.settings.shout_seed, self.view.settings.thought_seed)
+        self.view.tail_start_moved.emit(QPointF(100, 20))
+        self.assertEqual(self.view.settings.tail_start_angle, -0.4)
+        self.assertEqual(self.presenter.state.pending.target, loaded.target)
+        self.assertEqual((self.view.settings.shout_seed, self.view.settings.thought_seed), seeds)
+        self.presenter.flush_live_update()
+        self.assertEqual(self.gateway.writes[-1][1], self.view.settings)
 
     def test_real_timer_coalesces_edits_into_one_latest_snapshot(self):
         self.bind()

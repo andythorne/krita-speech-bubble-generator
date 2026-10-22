@@ -39,7 +39,8 @@ class EditorPresenter(QObject):
         if saved is not None:
             initial = saved.settings
             self._new_layer = saved.new_layer
-        initial = replace(initial, style=BubbleSettings().style)
+        defaults = BubbleSettings()
+        initial = replace(initial, shape=defaults.shape, style=defaults.style)
         self.state = EditorSession(view.load_settings(initial))
         if saved is not None:
             self.state.background_enabled = saved.background_enabled
@@ -51,6 +52,7 @@ class EditorPresenter(QObject):
         self.background_timer = self._timer(250, self.refresh_moved_background, single=True)
         view.edited.connect(self.edit)
         view.tail_moved.connect(self.move_tail)
+        view.tail_start_moved.connect(self.move_tail_start)
         def request_page(new_layer: bool) -> None:
             self.page_action(new_layer)
         view.page_requested.connect(request_page)
@@ -112,6 +114,9 @@ class EditorPresenter(QObject):
 
     def move_tail(self, point: QPointF) -> None:
         self.edit(self.renderer.move_tail(self.state.draft, point))
+
+    def move_tail_start(self, point: QPointF) -> None:
+        self.edit(self.renderer.move_tail_start(self.state.draft, point))
 
     def copy_style(self) -> None:
         self.state.copied_style = self.state.draft

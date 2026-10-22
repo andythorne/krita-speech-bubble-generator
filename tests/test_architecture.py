@@ -82,7 +82,7 @@ class ArchitectureTests(unittest.TestCase):
             allowed)
 
     def test_consumers_do_not_dispatch_on_saved_style_names(self):
-        identifiers = {"Oval", "Rounded", "Square", "Thought", "Shouting",
+        identifiers = {"Oval", "Rounded", "Square", "Tracing", "Sharp", "Thought", "Shouting",
                        "Balanced", "Angular", "Punchy", "Expressive"}
         for filename in ("bubbles/renderer.py", "editor/presenter.py",
                          "editor/view.py", "krita_host/gateway.py"):

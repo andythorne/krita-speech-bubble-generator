@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
 
 from .preview import BubblePreview
 from .contracts import PreviewContext, RenderedBubble
-from ..bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS, resolve_bubble
+from ..bubbles.registry import BUBBLE_STYLES, SHAPES, SHOUTING_ALGORITHMS, resolve_bubble
 from ..bubbles.settings import INTEGER_RANGES, BubbleSettings
 from .tail_compass import TailCompass
 from .text_resize_handle import TextResizeHandle
@@ -24,6 +24,7 @@ from .formatted_text import FormattedTextEdit
 class BubbleEditorView(QScrollArea):
     edited = pyqtSignal(object, tuple)
     tail_moved = pyqtSignal(object)
+    tail_start_moved = pyqtSignal(object)
     page_requested = pyqtSignal(bool)
     new_requested = pyqtSignal()
     import_requested = pyqtSignal()
@@ -61,7 +62,8 @@ class BubbleEditorView(QScrollArea):
         self.editStatus.setWordWrap(True)
         main.addWidget(self.editStatus)
 
-        preview_label = QLabel("Preview - drag the blue handle to reposition the tail")
+        preview_label = QLabel(
+            "Preview - drag the blue tail end; Advanced adds a green start handle")
         preview_label.setWordWrap(True)
         main.addWidget(preview_label)
         self.preview = BubblePreview(self)
@@ -136,6 +138,13 @@ class BubbleEditorView(QScrollArea):
         self.autocenter = QCheckBox("Center automatically")
         self.autocenter.setChecked(True)
         speech.addWidget(self.autocenter)
+        speech.addWidget(QLabel("Wrapping"))
+        self.wrapping = QComboBox()
+        self.wrapping.addItems(("Standard", "Diamond"))
+        self.wrapping.setToolTip(
+            "Diamond balances automatic lines from short to long to short. "
+            "Explicit line breaks are retained. Manual characters per line is unchanged.")
+        speech.addWidget(self.wrapping)
         self.opticalCenter = QCheckBox("Optical vertical centering")
         self.opticalCenter.setToolTip(
             "Balance the visual weight of the lettering instead of equal top and bottom gaps. "
@@ -150,18 +159,24 @@ class BubbleEditorView(QScrollArea):
         self.speechGroup.setLayout(speech)
         text_options.addWidget(self.speechGroup)
 
-        appearance_row = QHBoxLayout()
-        bubble_group = QGroupBox("Bubble type")
+        appearance_row = QVBoxLayout()
+        bubble_group = QGroupBox("Shape and style")
         bubble_row = QHBoxLayout()
+        self.bubbleShape = QComboBox()
+        self.bubbleShape.addItems(tuple(SHAPES))
+        self.bubbleShape.setCurrentText(self._settings.shape)
+        bubble_row.addWidget(QLabel("Shape"))
+        bubble_row.addWidget(self.bubbleShape)
         self.bubbleType = QComboBox()
-        self.bubbleType.addItems(tuple(BUBBLE_TYPES))
+        self.bubbleType.addItems(tuple(BUBBLE_STYLES))
         self.bubbleType.setCurrentText(self._settings.style)
+        bubble_row.addWidget(QLabel("Style"))
         bubble_row.addWidget(self.bubbleType)
         self.bubbleColor = QColor("white")
         self.bubbleColorButton = self.colorButton(self.bubbleColor)
         bubble_row.addWidget(self.bubbleColorButton)
         bubble_group.setLayout(bubble_row)
-        appearance_row.addWidget(bubble_group, 1)
+        appearance_row.addWidget(bubble_group)
 
         self.outlineSlider, self.outlineSpinBox, outline_row = self.numberRow("outline")
         outline_group = QGroupBox("Outline")
@@ -169,7 +184,7 @@ class BubbleEditorView(QScrollArea):
         self.outlineColorButton = self.colorButton(self.outlineColor)
         outline_row.addWidget(self.outlineColorButton)
         outline_group.setLayout(outline_row)
-        appearance_row.addWidget(outline_group, 1)
+        appearance_row.addWidget(outline_group)
         bubble_options.addLayout(appearance_row)
         self.paddingGroup = QGroupBox("Padding")
         self.paddingSlider, self.paddingSpinBox, padding_row = self.numberRow("padding")
@@ -177,32 +192,49 @@ class BubbleEditorView(QScrollArea):
         self.paddingGroup.setToolTip(
             "Extra space as a percentage of text size. Horizontal padding is twice vertical padding. "
             "At 0%, only the clearance needed for the outline and shape remains.")
-        self.paddingGroup.setLayout(padding_row)
-        bubble_options.addWidget(self.paddingGroup)
-        self.ovalGroup = QGroupBox("Customise shape")
-        self.ovalGroup.setCheckable(True)
+        self.paddingControls = QWidget()
+        padding_row.setContentsMargins(0, 0, 0, 0)
+        self.paddingControls.setLayout(padding_row)
+        simple_padding_layout = QVBoxLayout(self.paddingGroup)
+        simple_padding_layout.addWidget(self.paddingControls)
+        self.ovalGroup = QCheckBox("Advanced padding")
         self.ovalGroup.setChecked(False)
         self.ovalGroup.setToolTip(
             "Use independent horizontal and vertical padding and adjust squareness. "
-            "Turn off to restore the original bubble proportions.")
-        oval_layout = QVBoxLayout()
+            "Turning this off resets vertical padding to the simple setting and squareness to zero.")
+        bubble_options.addWidget(self.ovalGroup)
+        bubble_options.addWidget(self.paddingGroup)
+        self.advancedPadding = QGroupBox()
+        self.advancedPaddingLayout = QVBoxLayout(self.advancedPadding)
+        oval_layout = self.advancedPaddingLayout
+        horizontal_padding_label = QLabel("Horizontal padding")
+        horizontal_padding_label.setToolTip(
+            "Space on each side of the text: 100% adds twice the text size per side.")
+        oval_layout.addWidget(horizontal_padding_label)
         oval_layout.addWidget(QLabel("Vertical padding"))
         (self.ovalVerticalPaddingSlider, self.ovalVerticalPaddingSpinBox,
          vertical_padding_row) = self.numberRow("oval_vertical_padding")
         self.ovalVerticalPaddingSpinBox.setSuffix("%")
         self.ovalVerticalPaddingSpinBox.setToolTip(
             "Space above and below the text as a percentage of text size.")
-        oval_layout.addLayout(vertical_padding_row)
-        oval_layout.addWidget(QLabel("Squareness (0 is an elliptical base)"))
+        self.verticalPaddingControls = QWidget()
+        vertical_padding_row.setContentsMargins(0, 0, 0, 0)
+        self.verticalPaddingControls.setLayout(vertical_padding_row)
+        oval_layout.addWidget(self.verticalPaddingControls)
+        self.squarenessControls = QWidget()
+        squareness_layout = QVBoxLayout(self.squarenessControls)
+        squareness_layout.setContentsMargins(0, 0, 0, 0)
+        squareness_layout.addWidget(QLabel("Squareness (0 is an elliptical base)"))
         (self.ovalSquarenessSlider, self.ovalSquarenessSpinBox,
          squareness_row) = self.numberRow("oval_squareness")
         self.ovalSquarenessSpinBox.setSuffix("%")
         self.ovalSquarenessSpinBox.setToolTip(
             "Make the bubble fuller at its corners, towards a softly squared shape. "
             "Higher values fit the text more closely.")
-        oval_layout.addLayout(squareness_row)
-        self.ovalGroup.setLayout(oval_layout)
-        bubble_options.addWidget(self.ovalGroup)
+        squareness_layout.addLayout(squareness_row)
+        oval_layout.addWidget(self.squarenessControls)
+        self.advancedPadding.setVisible(False)
+        bubble_options.addWidget(self.advancedPadding)
         self.shoutingGroup = QGroupBox("Shouting")
         self.shoutingGroup.setToolTip(
             "Vary spike spacing, with subtle changes in spike height and valley depth.")
@@ -248,8 +280,8 @@ class BubbleEditorView(QScrollArea):
         style_actions = QHBoxLayout()
         self.copyStyle = QPushButton("Copy Style")
         self.copyStyle.setToolTip(
-            "Copy font, text size and colour, wrapping and centering, "
-            "all Bubble-tab options, and the tail curve amount and direction.")
+            "Copy all bubble appearance and text layout settings, including font, size, colour, "
+            "wrapping, centering, padding, seeded patterns, thought blob size and tail curvature.")
         self.pasteStyle = QPushButton("Paste Style")
         self.pasteStyle.setEnabled(False)
         self.pasteStyle.setToolTip(
@@ -262,6 +294,18 @@ class BubbleEditorView(QScrollArea):
 
         tail_group = QGroupBox("Tail")
         tail_layout = QVBoxLayout()
+        self.tailEnabled = QCheckBox("Enabled")
+        self.tailEnabled.setChecked(self._settings.tail_enabled)
+        self.tailEnabled.setToolTip("Hide the tail without changing its placement or settings.")
+        tail_options.addWidget(self.tailEnabled)
+        self.tailAdvanced = QCheckBox("Advanced")
+        self.tailAdvanced.setToolTip(
+            "Place the green start on the bubble edge and the blue end independently. "
+            "The compass, length and length lock apply only in simple mode.")
+        tail_layout.addWidget(self.tailAdvanced)
+        self.tailSimpleControls = QWidget()
+        simple_layout = QVBoxLayout(self.tailSimpleControls)
+        simple_layout.setContentsMargins(0, 0, 0, 0)
         tail_columns = QHBoxLayout()
         position_column = QVBoxLayout()
         position_column.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -287,7 +331,13 @@ class BubbleEditorView(QScrollArea):
         length_column.addWidget(self.lockTailLength)
         length_column.addWidget(self.tailLengthControls)
         tail_columns.addLayout(length_column, 1)
-        tail_layout.addLayout(tail_columns)
+        simple_layout.addLayout(tail_columns)
+        tail_layout.addWidget(self.tailSimpleControls)
+        self.tailAdvancedInstructions = QLabel(
+            "Drag the green start along the bubble edge and the blue end outside it. "
+            "Moving the start keeps the end fixed. Length lock is unavailable in Advanced.")
+        self.tailAdvancedInstructions.setWordWrap(True)
+        tail_layout.addWidget(self.tailAdvancedInstructions)
         curve_group = QGroupBox("Curve (0 keeps tail straight)")
         curve_layout = QVBoxLayout()
         self.tailCurveSlider, self.tailCurveSpinBox, curve_row = self.numberRow("tail_curve")
@@ -304,6 +354,13 @@ class BubbleEditorView(QScrollArea):
         curve_layout.addLayout(direction_row)
         curve_group.setLayout(curve_layout)
         tail_layout.addWidget(curve_group)
+        self.thoughtBlobsGroup = QGroupBox("# of thought blobs")
+        (self.thoughtBlobsSlider, self.thoughtBlobsSpinBox,
+         blobs_row) = self.numberRow("thought_blobs")
+        self.thoughtBlobsGroup.setLayout(blobs_row)
+        self.thoughtBlobsGroup.setEnabled(False)
+        self.thoughtBlobsGroup.setVisible(False)
+        tail_layout.addWidget(self.thoughtBlobsGroup)
         self.thoughtSizeGroup = QGroupBox("Thought blob size")
         self.thoughtSizeSlider, self.thoughtSizeSpinBox, thought_row = self.numberRow("thought_size")
         self.thoughtSizeSpinBox.setSuffix("%")
@@ -313,6 +370,7 @@ class BubbleEditorView(QScrollArea):
         tail_layout.addWidget(self.thoughtSizeGroup)
         tail_group.setLayout(tail_layout)
         tail_options.addWidget(tail_group)
+        self.tailControls = tail_group
 
         self.importInstructions = QLabel(
             "Recover an editable bubble made with the original Rogudator plugin. "
@@ -350,6 +408,7 @@ class BubbleEditorView(QScrollArea):
             "oval_vertical_padding": self.ovalVerticalPaddingSpinBox,
             "oval_squareness": self.ovalSquarenessSpinBox,
             "tail_length": self.tailSpinBox, "thought_size": self.thoughtSizeSpinBox,
+            "thought_blobs": self.thoughtBlobsSpinBox,
             "tail_curve": self.tailCurveSpinBox,
             "shout_irregularity": self.shoutingSpinBox, "shout_nodes": self.shoutingNodesSpinBox,
             "thought_irregularity": self.thoughtSpinBox, "thought_nodes": self.thoughtNodesSpinBox,
@@ -359,14 +418,21 @@ class BubbleEditorView(QScrollArea):
                 control.valueChanged.connect(self._number_changed(field))
         self.speechFontSize.valueChanged.connect(self.fontSizeChanged)
         self.bubbleType.currentIndexChanged.connect(self.bubbleStyleChanged)
+        self.bubbleShape.currentIndexChanged.connect(self._shape_changed)
         self.bubbleText.textChanged.connect(lambda: self._emit("text", "text_styles"))
         self.bubbleText.currentCharFormatChanged.connect(self._sync_emphasis)
         self.speechFont.currentFontChanged.connect(lambda: self._emit("font"))
         self.autocenter.toggled.connect(self.averageLineLength.setHidden)
         self.autocenter.toggled.connect(lambda: self._emit("autocenter"))
+        self.autocenter.toggled.connect(self.wrapping.setEnabled)
+        self.wrapping.currentIndexChanged.connect(lambda: self._emit("wrapping"))
         self.opticalCenter.toggled.connect(lambda: self._emit("optical_center"))
         self.lockTailLength.toggled.connect(self.tailLengthControls.setEnabled)
         self.lockTailLength.toggled.connect(lambda: self._emit("lock_tail"))
+        self.tailEnabled.toggled.connect(self._tail_controls_changed)
+        self.tailEnabled.toggled.connect(lambda: self._emit("tail_enabled"))
+        self.tailAdvanced.toggled.connect(self._tail_controls_changed)
+        self.tailAdvanced.toggled.connect(lambda: self._emit("tail_advanced"))
         self.tailCurveDirection.currentIndexChanged.connect(
             lambda: self._emit("tail_curve_direction"))
         self.shoutingShape.currentIndexChanged.connect(lambda: self._emit("shout_shape"))
@@ -378,6 +444,7 @@ class BubbleEditorView(QScrollArea):
         ):
             button.clicked.connect(self._color_changed(attribute, field, button))
         self.preview.tailMoved.connect(self.tail_moved.emit)
+        self.preview.tailStartMoved.connect(self.tail_start_moved.emit)
         self.tailCompass.angle_selected.connect(self._tail_angle_changed)
         self.addOnPage.clicked.connect(
             lambda: self.page_requested.emit(self.addDestination.currentIndex() == 0))
@@ -395,6 +462,8 @@ class BubbleEditorView(QScrollArea):
         widget = QWidget()
         widget.setLayout(main)
         self.setWidget(widget)
+        self._update_padding_label()
+        self._tail_controls_changed()
         self.wheelGuard = WheelGuard(self, self)
         for control in widget.findChildren(QWidget):
             if isinstance(control, (QAbstractSpinBox, QComboBox, QSlider)):
@@ -408,6 +477,12 @@ class BubbleEditorView(QScrollArea):
 
     def _number_changed(self, field: str) -> Callable[[int], None]:
         def changed(value: int) -> None:
+            if field == "padding" and not self.ovalGroup.isChecked() and not self._loading:
+                with QSignalBlocker(self.ovalVerticalPaddingSpinBox):
+                    self.ovalVerticalPaddingSpinBox.setValue(value)
+                self.ovalVerticalPaddingSlider.setValue(value)
+                self._emit("padding", "oval_vertical_padding")
+                return
             self._emit(field)
         return changed
 
@@ -433,8 +508,7 @@ class BubbleEditorView(QScrollArea):
         return value
 
     def numberRow(self, field: str) -> Tuple[QSlider, QSpinBox, QHBoxLayout]:
-        minimum, maximum = ((0, self._settings.font_size * 10) if field == "tail_length"
-                            else INTEGER_RANGES[field])
+        minimum, maximum = INTEGER_RANGES[field]
         value = self._number_value(self._settings, field)
         row = QHBoxLayout()
         slider = QSlider(Qt.Orientation.Horizontal)
@@ -470,41 +544,53 @@ class BubbleEditorView(QScrollArea):
             self._emit(field)
 
     def fontSizeChanged(self) -> None:
-        loading = self._loading
-        self._loading = True
-        try:
-            maximum = self.speechFontSize.value() * 10
-            self.tailSlider.setMaximum(maximum)
-            self.tailSpinBox.setMaximum(maximum)
-        finally:
-            self._loading = loading
-        self._emit("font_size", "tail_length")
+        self._emit("font_size")
 
     def bubbleStyleChanged(self) -> None:
         capabilities = resolve_bubble(
-            self.bubbleType.currentText(), self.shoutingShape.currentText()).capabilities
+            self.bubbleType.currentText(), self.shoutingShape.currentText(),
+            self.bubbleShape.currentText()).capabilities
         self.thoughtSizeGroup.setEnabled(capabilities.thought)
         self.thoughtSizeGroup.setVisible(capabilities.thought)
+        self.thoughtBlobsGroup.setEnabled(capabilities.thought)
+        self.thoughtBlobsGroup.setVisible(capabilities.thought)
         self.thoughtGroup.setVisible(capabilities.thought)
         self.shoutingGroup.setVisible(capabilities.shouting)
-        self.ovalGroup.setVisible(capabilities.custom_enclosure)
         self._update_padding_label()
         self._emit("style")
 
+    def _shape_changed(self) -> None:
+        self._update_padding_label()
+        self._emit("shape")
+
     def _update_padding_label(self) -> None:
-        capabilities = resolve_bubble(
-            self.bubbleType.currentText(), self.shoutingShape.currentText()).capabilities
-        custom = capabilities.custom_enclosure and self.ovalGroup.isChecked()
-        self.paddingGroup.setTitle("Horizontal padding" if custom else "Padding")
-        self.paddingGroup.setToolTip(
-            "Space on each side of the text: 100% adds twice the text size per side."
-            if custom else
-            "Extra space as a percentage of text size. Horizontal padding is twice vertical padding. "
-            "At 0%, only the clearance needed for the outline and shape remains.")
+        custom = self.ovalGroup.isChecked()
+        if custom:
+            self.advancedPaddingLayout.insertWidget(1, self.paddingControls)
+        else:
+            padding_layout = self.paddingGroup.layout()
+            if padding_layout is not None:
+                padding_layout.addWidget(self.paddingControls)
+        self.paddingGroup.setVisible(not custom)
+        self.advancedPadding.setVisible(custom)
+        self.advancedPadding.setEnabled(custom)
+        self.squarenessControls.setVisible(
+            SHAPES[self.bubbleShape.currentText()].capabilities.squareness)
 
     def _oval_custom_changed(self, checked: bool) -> None:
+        if not checked and not self._loading:
+            loading = self._loading
+            self._loading = True
+            try:
+                self.ovalVerticalPaddingSpinBox.setValue(self.paddingSpinBox.value())
+                self.ovalSquarenessSpinBox.setValue(0)
+            finally:
+                self._loading = loading
         self._update_padding_label()
-        self._emit("oval_custom")
+        if checked:
+            self._emit("oval_custom")
+        else:
+            self._emit("oval_custom", "oval_vertical_padding", "oval_squareness")
 
     def _emit(self, *fields: str) -> None:
         if not self._loading:
@@ -515,14 +601,22 @@ class BubbleEditorView(QScrollArea):
             self._settings = replace(self._settings, tail_angle=angle)
             self._emit("tail_angle")
 
+    def _tail_controls_changed(self) -> None:
+        self.tailControls.setEnabled(self.tailEnabled.isChecked())
+        advanced = self.tailAdvanced.isChecked()
+        self.tailSimpleControls.setEnabled(not advanced)
+        self.tailAdvancedInstructions.setVisible(advanced)
+
     def initial_settings(self) -> BubbleSettings:
         return replace(
             self._settings, **{field: control.value() for field, control in self._numbers.items()},
             style=self.bubbleType.currentText(), text=self.bubbleText.toPlainText(),
+            shape=self.bubbleShape.currentText(), wrapping=self.wrapping.currentText(),
             text_styles=self.bubbleText.text_styles(),
             font=self.speechFont.currentFont().family(), fill=self.bubbleColor.name(),
             stroke=self.outlineColor.name(), text_color=self.speechFontColor.name(),
             autocenter=self.autocenter.isChecked(), lock_tail=self.lockTailLength.isChecked(),
+            tail_enabled=self.tailEnabled.isChecked(), tail_advanced=self.tailAdvanced.isChecked(),
             optical_center=self.opticalCenter.isChecked(),
             oval_custom=self.ovalGroup.isChecked(),
             tail_curve_direction=self.tailCurveDirection.currentText(),
@@ -530,7 +624,9 @@ class BubbleEditorView(QScrollArea):
 
     def load_settings(self, settings: BubbleSettings) -> BubbleSettings:
         loaded = self._bind_settings(settings, {field.name for field in fields(BubbleSettings)})
-        self.bubbleText.document().clearUndoRedoStacks()
+        document = self.bubbleText.document()
+        if document is not None:
+            document.clearUndoRedoStacks()
         return loaded
 
     def reflect_settings(self, settings: BubbleSettings) -> BubbleSettings:
@@ -548,6 +644,11 @@ class BubbleEditorView(QScrollArea):
                 self.tailCompass.set_angle(settings.tail_angle)
             if "style" in changed:
                 self.bubbleType.setCurrentText(settings.style)
+            if "shape" in changed:
+                self.bubbleShape.setCurrentText(settings.shape)
+                self._update_padding_label()
+            if "wrapping" in changed:
+                self.wrapping.setCurrentText(settings.wrapping)
             if "text" in changed and self.bubbleText.toPlainText() != settings.text:
                 self.bubbleText.setPlainText(settings.text)
             if "text_styles" in changed or "text" in changed:
@@ -557,19 +658,23 @@ class BubbleEditorView(QScrollArea):
                 self.speechFont.setCurrentFont(QFont(settings.font))
             if "font_size" in changed:
                 self.speechFontSize.setValue(settings.font_size)
-                self.tailSlider.setMaximum(settings.font_size * 10)
-                self.tailSpinBox.setMaximum(settings.font_size * 10)
             for field, control in self._numbers.items():
                 if field in changed:
                     control.setValue(self._number_value(settings, field))
             if "autocenter" in changed:
                 self.autocenter.setChecked(settings.autocenter)
                 self.averageLineLength.setHidden(settings.autocenter)
+                self.wrapping.setEnabled(settings.autocenter)
             if "optical_center" in changed:
                 self.opticalCenter.setChecked(settings.optical_center)
             if "lock_tail" in changed:
                 self.lockTailLength.setChecked(settings.lock_tail)
                 self.tailLengthControls.setEnabled(settings.lock_tail)
+            if "tail_enabled" in changed:
+                self.tailEnabled.setChecked(settings.tail_enabled)
+            if "tail_advanced" in changed:
+                self.tailAdvanced.setChecked(settings.tail_advanced)
+            self._tail_controls_changed()
             if "shout_shape" in changed:
                 self.shoutingShape.setCurrentText(settings.shout_shape)
             if "tail_curve_direction" in changed:
@@ -593,7 +698,7 @@ class BubbleEditorView(QScrollArea):
             self._loading = False
 
     def show_render(self, rendered: RenderedBubble) -> None:
-        self.preview.setBubble(rendered.svg, rendered.view_box, rendered.tip)
+        self.preview.setBubble(rendered.svg, rendered.view_box, rendered.tip, rendered.tail_start)
 
     def show_context(self, context: Optional[PreviewContext]) -> None:
         if context is None:

@@ -13,10 +13,10 @@ from PyQt5.QtSvg import QSvgRenderer
 from PyQt5.QtWidgets import QApplication
 
 from krita_speech_bubble_generator.bubbles.geometry import (
-    body_path, bubble_path, path_data, tail_anchor, tail_tip,
+    body_path, bubble_path, path_data, tail_anchor, tail_tip, oval_path,
 )
 from krita_speech_bubble_generator.bubbles.registry import (
-    BUBBLE_TYPES, SHOUTING_ALGORITHMS,
+    BUBBLE_TYPES, BUBBLE_STYLES, SHAPES, SHOUTING_ALGORITHMS, resolve_bubble,
 )
 from krita_speech_bubble_generator.bubbles.renderer import (
     BubbleRenderer, Geometry, RenderResult, automatic_speech_lines, get_speech_lines,
@@ -140,28 +140,27 @@ class BubbleRendererTests(unittest.TestCase):
         self.assertEqual(automatic_speech_lines("Hello\n\nworld"), ["Hello", "", "world"])
 
     def test_named_geometry_matches_direct_type_and_tail_api(self):
-        for style in BUBBLE_TYPES:
+        for style in BUBBLE_STYLES:
             with self.subTest(style=style):
                 settings = replace(self.settings, style=style, tail_length=43,
                                    thought_irregularity=79, shout_irregularity=61)
                 result = self.renderer.geometry(settings)
                 self.assertIsInstance(result, Geometry)
                 self.assertIs(result.body_rect, result[0])
-                thought = BUBBLE_TYPES[style].capabilities.thought
-                body = body_path(
-                    result.body_rect, style,
-                    BUBBLE_TYPES[style].body_parameters(settings).corner_radius,
-                    settings.thought_irregularity if thought else settings.shout_irregularity,
-                    settings.thought_seed if thought else settings.shout_seed,
-                    settings.shout_shape,
-                    settings.thought_nodes if thought else settings.shout_nodes)
+                bubble = resolve_bubble(style, settings.shout_shape)
+                contour = oval_path(result.body_rect)
+                body = bubble.decorate(oval_path(result.body_rect),
+                                       bubble.body_parameters(settings),
+                                       lambda point: SHAPES[settings.shape].project(
+                                           contour, point, settings))
                 self.assertEqual(path_data(result.body), path_data(body))
                 self.assertEqual(result.tip, tail_tip(
                     body, result.body_rect.center(), settings.tail_angle, 43))
                 self.assertEqual(result.path, bubble_path(
                     body, result.body_rect.center(), result.tip, style,
                     settings.font_size, settings.thought_size,
-                    settings.thought_irregularity, settings.thought_seed))
+                    settings.thought_irregularity, settings.thought_seed,
+                    outline_width=settings.outline))
                 self.assertTrue(result.body_rect.contains(result.text_rect))
 
     def test_measurements_match_rendered_font_size_and_preserve_line_spacing(self):
@@ -223,6 +222,134 @@ class BubbleRendererTests(unittest.TestCase):
         self.assertEqual(preview.view_box,
                          geometry.path.boundingRect().adjusted(-27, -27, 27, 27))
 
+    def test_thought_blob_counts_match_preview_export_and_preserve_body_and_placement(self):
+        for advanced in (False, True):
+            for curve in (0, 75):
+                settings = replace(
+                    self.settings, style="Thought", tail_length=100, tail_angle=0,
+                    tail_advanced=advanced, tail_curve=curve, thought_irregularity=0)
+                original = self.renderer.geometry(settings)
+                for count in range(1, 11):
+                    with self.subTest(advanced=advanced, curve=curve, count=count):
+                        changed = replace(settings, thought_blobs=count)
+                        geometry = self.renderer.geometry(changed)
+                        self.assertEqual(len(geometry.path.toSubpathPolygons()), count + 1)
+                        self.assertEqual(geometry.body, original.body)
+                        self.assertEqual(geometry.text_rect, original.text_rect)
+                        self.assertEqual(geometry.tip, original.tip)
+                        preview, exported = [self.renderer.render(changed, preview)
+                                             for preview in (True, False)]
+                        self.assertEqual(preview.tail_start,
+                                         self.renderer.render(settings, True).tail_start)
+                        paths = [ET.fromstring(result.svg).find(".//" + SVG + "path").attrib
+                                 for result in (preview, exported)]
+                        self.assertEqual(*paths)
+                        if count == 3:
+                            self.assertEqual(geometry.path, original.path)
+                disabled = self.renderer.geometry(replace(changed, tail_enabled=False))
+                self.assertEqual(disabled.path, disabled.body)
+        for style in ("Sharp", "Rounded", "Shouting"):
+            settings = replace(self.settings, style=style, tail_length=100)
+            self.assertEqual(self.renderer.render(settings),
+                             self.renderer.render(replace(settings, thought_blobs=10)))
+
+    def test_disabling_tail_removes_geometry_and_handles_without_clearing_settings(self):
+        for style in BUBBLE_STYLES:
+            for advanced in (False, True):
+                with self.subTest(style=style, advanced=advanced):
+                    settings = replace(
+                        self.settings, style=style, tail_length=83, tail_advanced=advanced,
+                        tail_start_angle=-0.5, tail_end_x=230, tail_end_y=-80, lock_tail=False)
+                    before = self.renderer.render(settings, preview=True)
+                    disabled = replace(settings, tail_enabled=False)
+                    geometry = self.renderer.geometry(disabled)
+                    self.assertEqual(geometry.path, geometry.body)
+                    for preview in (False, True):
+                        rendered = self.renderer.render(disabled, preview)
+                        self.assertIsNone(rendered.tip)
+                        self.assertIsNone(rendered.tail_start)
+                    self.assertEqual(self.renderer.move_tail(disabled, QPointF(900, 400)), disabled)
+                    self.assertEqual(
+                        self.renderer.move_tail_start(disabled, QPointF(20, 0)), disabled)
+                    self.assertEqual(self.renderer.render(
+                        replace(disabled, tail_enabled=True), preview=True), before)
+
+    def test_advanced_tail_points_are_independent_across_all_shapes_and_styles(self):
+        for shape in SHAPES:
+            for style in BUBBLE_STYLES:
+                for locked in (False, True):
+                    with self.subTest(shape=shape, style=style, locked=locked):
+                        initial = replace(
+                            self.settings, shape=shape, style=style, tail_length=85,
+                            tail_angle=0.2, tail_advanced=True, lock_tail=locked)
+                        before = self.renderer.geometry(initial)
+                        center = before.body_rect.center()
+                        moved = self.renderer.move_tail_start(initial, center + QPointF(80, -40))
+                        after = self.renderer.geometry(moved)
+                        start = self.renderer.render(moved, preview=True).tail_start
+                        expected_start = tail_tip(
+                            after.body, center, math.atan2(-40, 80), 0)
+                        self.assertEqual(start, expected_start)
+                        self.assertEqual(after.tip, before.tip)
+                        self.assertNotEqual(after.path, before.path)
+                        self.assertEqual(after.body, before.body)
+                        self.assertEqual(after.text_rect, before.text_rect)
+                        target = center + QPointF(220, -65)
+                        moved_end = self.renderer.move_tail(moved, target)
+                        rendered = self.renderer.render(moved_end, preview=True)
+                        self.assertEqual(rendered.tip, target)
+                        self.assertEqual(rendered.tail_start, start)
+                        self.assertEqual((moved_end.tail_length, moved_end.lock_tail), (85, locked))
+                        self.assertEqual((moved_end.shout_seed, moved_end.thought_seed),
+                                         (initial.shout_seed, initial.thought_seed))
+
+    def test_advanced_tail_clamps_inside_endpoints_and_supports_zero_simple_length(self):
+        settings = replace(self.settings, tail_advanced=True, tail_length=0, lock_tail=True)
+        geometry = self.renderer.geometry(settings)
+        self.assertIsNotNone(geometry.tip)
+        self.assertNotEqual(geometry.path, geometry.body)
+        center = geometry.body_rect.center()
+        for point in (center, center + QPointF(1, 0), center + QPointF(-1, -1)):
+            with self.subTest(point=point):
+                moved = self.renderer.move_tail(settings, point)
+                rendered = self.renderer.render(moved, preview=True)
+                self.assertFalse(geometry.body.contains(rendered.tip))
+                self.assertGreater((rendered.tip - rendered.tail_start).manhattanLength(), 0)
+                self.assertEqual(self.renderer.move_tail_start(moved, center), moved)
+        moved = self.renderer.move_tail(settings, center + QPointF(220, 60))
+        enlarged = replace(moved, font_size=99, text="A much bigger bubble", padding=300)
+        enlarged_geometry = self.renderer.geometry(enlarged)
+        self.assertFalse(enlarged_geometry.body.contains(enlarged_geometry.tip))
+
+    def test_advanced_curves_share_preview_export_geometry_and_preserve_both_points(self):
+        for style in BUBBLE_STYLES:
+            for direction in ("Up", "Down"):
+                with self.subTest(style=style, direction=direction):
+                    settings = replace(
+                        self.settings, style=style, tail_advanced=True, tail_length=85,
+                        tail_angle=0.2, tail_start_angle=-0.5,
+                        tail_end_x=200, tail_end_y=30)
+                    straight = self.renderer.render(settings, preview=True)
+                    curved = replace(settings, tail_curve=80, tail_curve_direction=direction)
+                    preview = self.renderer.render(curved, preview=True)
+                    exported = self.renderer.render(curved)
+                    self.assertEqual(preview.tip, straight.tip)
+                    self.assertEqual(preview.tail_start, straight.tail_start)
+                    self.assertNotEqual(preview.svg, straight.svg)
+                    roots = [ET.fromstring(result.svg) for result in (preview, exported)]
+                    self.assertEqual(roots[0].find(".//" + SVG + "path").attrib,
+                                     roots[1].find(".//" + SVG + "path").attrib)
+
+    def test_switching_tail_modes_restores_each_placement(self):
+        simple = replace(self.settings, tail_length=85)
+        advanced = self.renderer.move_tail_start(
+            replace(simple, tail_advanced=True), QPointF(800, 0))
+        advanced = self.renderer.move_tail(advanced, QPointF(500, 160))
+        simple_again = replace(advanced, tail_advanced=False)
+        self.assertEqual(self.renderer.render(simple_again), self.renderer.render(simple))
+        self.assertEqual(self.renderer.render(replace(simple_again, tail_advanced=True)),
+                         self.renderer.render(advanced))
+
     def test_curves_preserve_body_text_tip_and_shared_preview_export_path(self):
         for style in BUBBLE_TYPES:
             settings = replace(self.settings, style=style, tail_length=100)
@@ -240,7 +367,8 @@ class BubbleRendererTests(unittest.TestCase):
                     self.assertEqual(geometry.path, bubble_path(
                         geometry.body, geometry.body_rect.center(), geometry.tip,
                         style, settings.font_size, settings.thought_size,
-                        settings.thought_irregularity, settings.thought_seed, 80, bend))
+                        settings.thought_irregularity, settings.thought_seed, 80, bend,
+                        outline_width=settings.outline))
                     preview = self.renderer.render(curved, preview=True)
                     exported = self.renderer.render(curved)
                     self.assertEqual(
@@ -335,8 +463,6 @@ class BubbleRendererTests(unittest.TestCase):
             settings = replace(self.settings, style=style)
             original = self.renderer.geometry(settings)
             changed = replace(settings, oval_vertical_padding=0, oval_squareness=100)
-            if not BUBBLE_TYPES[style].capabilities.custom_enclosure:
-                changed = replace(changed, oval_custom=True)
             geometry = self.renderer.geometry(changed)
             self.assertEqual(geometry.body_rect, original.body_rect)
             self.assertEqual(geometry.body, original.body)
@@ -585,14 +711,14 @@ class BubbleRendererTests(unittest.TestCase):
                 self.assertIs(self.renderer.move_tail(
                     original, geometry.body_rect.center()), original)
 
-    def test_unlocked_tail_uses_outline_distance_rounding_and_font_limit(self):
+    def test_unlocked_tail_uses_outline_distance_rounding_and_absolute_limit(self):
         for style in BUBBLE_TYPES:
             settings = replace(self.settings, style=style, lock_tail=False)
             geometry = self.renderer.geometry(settings)
             center = geometry.body_rect.center()
             direction = QPointF(math.cos(0.37), math.sin(0.37))
             anchor = tail_anchor(geometry.body, center, direction)
-            for distance, expected in ((37.2, 37), (37.8, 38), (10000, 180)):
+            for distance, expected in ((37.2, 37), (37.8, 38), (650, 650), (10000, 990)):
                 with self.subTest(style=style, distance=distance):
                     result = self.renderer.move_tail(settings, anchor + direction * distance)
                     self.assertEqual(result.tail_length, expected)
@@ -666,17 +792,17 @@ class BubbleRendererTests(unittest.TestCase):
 
         bubble = CustomBubble()
         settings = replace(self.settings, style=bubble.identifier)
-        with patch.dict(BUBBLE_TYPES, {bubble.identifier: bubble}):
+        with patch.dict(BUBBLE_STYLES, {bubble.identifier: bubble}):
             geometry = self.renderer.geometry(settings)
-            self.assertEqual(geometry.body_rect, QRectF(0, 0, 600, 300))
-            self.assertEqual(geometry.body, bubble.body_path(geometry.body_rect))
+            self.assertEqual(geometry.body, oval_path(geometry.body_rect))
             self.assertIn("<svg", self.renderer.render(settings).svg)
         calls = []
 
-        def resolve(style, algorithm):
-            calls.append((style, algorithm))
+        def resolve(style, algorithm, shape):
+            calls.append((style, algorithm, shape))
             return bubble
 
         self.assertEqual(BubbleRenderer(resolve).geometry(self.settings).body_rect,
                          QRectF(0, 0, 600, 300))
-        self.assertEqual(calls, [(self.settings.style, self.settings.shout_shape)])
+        self.assertEqual(calls, [(self.settings.style, self.settings.shout_shape,
+                                  self.settings.shape)])

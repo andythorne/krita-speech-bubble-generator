@@ -1,6 +1,6 @@
 from copy import deepcopy
 from collections import UserDict
-from dataclasses import FrozenInstanceError, asdict, replace
+from dataclasses import FrozenInstanceError, asdict, fields, replace
 import json
 import math
 import unittest
@@ -8,7 +8,7 @@ import unittest
 from PyQt5.QtGui import QTransform
 
 from krita_speech_bubble_generator.bubbles.settings import (
-    BubbleSettings, INTEGER_RANGES, SettingsError, TextStyle, decode_record, encode_record,
+    BubbleSettings, INTEGER_RANGES, STYLE_FIELDS, SettingsError, TextStyle, decode_record, encode_record,
     settings_from_dict, transform_values, validate_settings,
 )
 
@@ -16,35 +16,47 @@ from krita_speech_bubble_generator.bubbles.settings import (
 class SettingsTests(unittest.TestCase):
     def test_style_transfer_copies_text_appearance_bubble_options_and_tail_curvature(self):
         source = BubbleSettings(
-            style="Shouting", text="Source", font="Serif", font_size=28,
+            shape="Tracing", style="Shouting", wrapping="Diamond",
+            text="Source", font="Serif", font_size=28,
             text_color="#112233", text_styles=(TextStyle(0, 3, True),),
             fill="#123456", stroke="#654321", outline=7, padding=65,
             oval_custom=True, oval_vertical_padding=35, oval_squareness=80,
             autocenter=False, optical_center=True, line_length=32,
             tail_length=150, tail_angle=-2.1, lock_tail=False,
-            tail_curve=73, tail_curve_direction="Down", thought_size=275,
+            tail_curve=73, tail_curve_direction="Down", thought_size=275, thought_blobs=7,
             shout_shape="Expressive", shout_nodes=37, shout_irregularity=85,
             thought_nodes=29, thought_irregularity=75,
             shout_seed=1729, thought_seed=2718)
         target = replace(BubbleSettings(), shout_seed=123, thought_seed=456,
                          text_styles=(TextStyle(0, 5, False, True),))
         style_fields = (
-            "style", "fill", "stroke", "outline", "padding", "oval_custom",
+            "style", "shape", "wrapping", "fill", "stroke", "outline", "padding", "oval_custom",
             "oval_vertical_padding", "oval_squareness", "shout_shape", "shout_nodes",
             "shout_irregularity", "thought_nodes", "thought_irregularity",
             "tail_curve", "tail_curve_direction", "font", "font_size",
-            "text_color", "autocenter", "optical_center", "line_length")
+            "text_color", "autocenter", "optical_center", "line_length",
+            "thought_size", "thought_blobs", "thought_seed", "shout_seed")
+        self.assertEqual(set(STYLE_FIELDS), set(style_fields))
+        self.assertEqual(
+            set(style_fields) | {
+                "text", "text_styles", "tail_angle", "tail_length", "lock_tail",
+                "tail_enabled", "tail_advanced", "tail_start_angle", "tail_end_x", "tail_end_y"},
+            {field.name for field in fields(BubbleSettings)})
         expected = replace(target, **{name: getattr(source, name) for name in style_fields})
         self.assertEqual(target.with_style_from(source), expected)
         self.assertEqual(target.shout_seed, 123)
         self.assertEqual(source.text, "Source")
 
     def test_defaults_use_oval_without_overriding_saved_styles(self):
-        self.assertEqual(BubbleSettings().style, "Oval")
-        self.assertEqual(settings_from_dict({}).style, "Oval")
-        for style in ("Oval", "Rounded", "Square", "Thought", "Shouting"):
+        self.assertEqual((BubbleSettings().shape, BubbleSettings().style), ("Oval", "Sharp"))
+        self.assertEqual(settings_from_dict({}).wrapping, "Standard")
+        mapping = {"Oval": ("Oval", "Sharp"), "Rounded": ("Square", "Rounded"),
+                   "Square": ("Square", "Sharp"), "Thought": ("Oval", "Thought"),
+                   "Shouting": ("Oval", "Shouting")}
+        for style, expected in mapping.items():
             with self.subTest(style=style):
-                self.assertEqual(settings_from_dict({"style": style}).style, style)
+                settings = settings_from_dict({"style": style})
+                self.assertEqual((settings.shape, settings.style), expected)
 
     def test_serialization_includes_every_setting_with_its_current_value(self) -> None:
         changed = BubbleSettings(
@@ -53,7 +65,7 @@ class SettingsTests(unittest.TestCase):
             outline=5, padding=120, autocenter=False, line_length=30,
             optical_center=True,
             oval_custom=True, oval_vertical_padding=35, oval_squareness=65,
-            tail_length=50, tail_angle=-1.5, lock_tail=False, thought_size=125,
+            tail_length=50, tail_angle=-1.5, lock_tail=False, thought_size=125, thought_blobs=10,
             tail_curve=73, tail_curve_direction="Down",
             shout_irregularity=70, shout_shape="Expressive", shout_nodes=32,
             shout_seed=123, thought_irregularity=60, thought_nodes=20,
@@ -69,6 +81,59 @@ class SettingsTests(unittest.TestCase):
         values["baseline"] = [1, 0, 0, 1, -7, 12]
         values.update(changes)
         return values
+
+    def test_tail_placement_round_trips_without_becoming_a_copied_style(self):
+        settings = BubbleSettings(
+            tail_enabled=False, tail_advanced=True, tail_start_angle=-1.2,
+            tail_end_x=225.5, tail_end_y=-87.25, tail_length=70, lock_tail=True)
+        self.assertEqual(decode_record(encode_record(settings, QTransform())).settings, settings)
+        pasted = settings.with_style_from(BubbleSettings(tail_curve=50))
+        self.assertEqual(pasted, replace(settings, tail_curve=50))
+
+    def test_thought_blob_count_defaults_round_trips_and_rejects_invalid_values(self):
+        self.assertEqual(INTEGER_RANGES["thought_blobs"], (1, 10))
+        self.assertEqual(BubbleSettings().thought_blobs, 3)
+        values = self.record()
+        del values["thought_blobs"]
+        for legacy in (False, True):
+            self.assertEqual(settings_from_dict(values, legacy=legacy).thought_blobs, 3)
+        for count in range(1, 11):
+            settings = replace(BubbleSettings(), thought_blobs=count)
+            self.assertEqual(decode_record(encode_record(settings, QTransform())).settings,
+                             settings)
+        for count in (0, 11, -1, True, 3.0, "3", None):
+            with self.subTest(count=count), self.assertRaises(SettingsError):
+                settings_from_dict(self.record(thought_blobs=count), legacy=True)
+
+    def test_older_tail_settings_default_to_enabled_simple_mode(self):
+        values = self.record(tail_length=73)
+        new_fields = ("tail_enabled", "tail_advanced", "tail_start_angle",
+                      "tail_end_x", "tail_end_y")
+        for key in new_fields:
+            del values[key]
+        original = deepcopy(values)
+        for legacy in (False, True):
+            settings = settings_from_dict(values, legacy=legacy)
+            self.assertTrue(settings.tail_enabled)
+            self.assertFalse(settings.tail_advanced)
+            self.assertIsNone(settings.tail_start_angle)
+            self.assertIsNone(settings.tail_end_x)
+            self.assertIsNone(settings.tail_end_y)
+            self.assertEqual(settings.tail_length, 73)
+        self.assertEqual(values, original)
+
+    def test_invalid_tail_modes_and_placement_are_rejected(self):
+        for key in ("tail_enabled", "tail_advanced"):
+            for value in (0, 1, "true", None):
+                with self.subTest(key=key, value=value), self.assertRaises(SettingsError):
+                    settings_from_dict(self.record(**{key: value}), legacy=True)
+        for key in ("tail_start_angle", "tail_end_x", "tail_end_y"):
+            for value in (True, "1", float("nan"), float("inf"), [], {}):
+                with self.subTest(key=key, value=value), self.assertRaises(SettingsError):
+                    settings_from_dict(self.record(**{key: value}), legacy=True)
+        for values in ({"tail_end_x": 1}, {"tail_end_y": 1}):
+            with self.subTest(values=values), self.assertRaises(SettingsError):
+                settings_from_dict(self.record(**values), legacy=True)
 
     def test_settings_are_immutable_and_baseline_is_not_an_editable_field(self):
         settings = BubbleSettings()
@@ -127,6 +192,23 @@ class SettingsTests(unittest.TestCase):
         fresh = settings_from_dict({})
         self.assertEqual(fresh.shout_irregularity, 50)
         self.assertEqual(fresh.thought_irregularity, 50)
+        self.assertEqual((fresh.shout_nodes, fresh.thought_nodes), (10, 10))
+        self.assertEqual((BubbleSettings().shout_nodes, BubbleSettings().thought_nodes), (10, 10))
+
+    def test_node_defaults_never_replace_explicit_persisted_values(self):
+        for shout, thought in ((24, 16), (37, 29), (10, 10)):
+            settings = BubbleSettings(shout_nodes=shout, thought_nodes=thought)
+            self.assertEqual(settings_from_dict(settings.to_dict()), settings)
+            self.assertEqual(decode_record(encode_record(settings, QTransform())).settings,
+                             settings)
+
+    def test_style_transfer_preserves_target_emphasis_not_source_offsets(self):
+        source = BubbleSettings(text="A long source", text_styles=(TextStyle(5, 13, True),))
+        for text, runs in (("", ()), ("X", (TextStyle(0, 1, False, True),))):
+            target = BubbleSettings(text=text, text_styles=runs)
+            pasted = target.with_style_from(source)
+            self.assertEqual((pasted.text, pasted.text_styles), (text, runs))
+            self.assertEqual(decode_record(encode_record(pasted, QTransform())).settings, pasted)
 
     def test_text_styles_default_to_empty_for_fresh_and_saved_settings(self):
         self.assertEqual(BubbleSettings().text_styles, ())
@@ -227,7 +309,7 @@ class SettingsTests(unittest.TestCase):
         del values["shout_nodes"]
         self.assertEqual(validate_settings(values)["shout_nodes"], 18)
         self.assertEqual(
-            settings_from_dict({"shout_shape": "Punchy"}).shout_nodes, 24)
+            settings_from_dict({"shout_shape": "Punchy"}).shout_nodes, 10)
 
     def test_each_integer_field_rejects_bool_fraction_and_out_of_range(self):
         for field, (low, high) in INTEGER_RANGES.items():
@@ -236,9 +318,19 @@ class SettingsTests(unittest.TestCase):
                     with self.assertRaisesRegex(SettingsError, "Invalid " + field):
                         validate_settings(self.record(**{field: value}))
 
-    def test_tail_limit_follows_font_size(self):
-        validate_settings(self.record(font_size=2, tail_length=20))
-        for value in (-1, 21, True, 1.5):
+    def test_absolute_tail_length_round_trips_independently_of_font_size(self):
+        for locked in (True, False):
+            for font_size, length in ((14, 650), (10, 400), (1, 990), (99, 0)):
+                with self.subTest(locked=locked, font_size=font_size, length=length):
+                    settings = BubbleSettings(font_size=font_size, tail_length=length,
+                                              tail_angle=-1.2, lock_tail=locked)
+                    self.assertEqual(settings_from_dict(settings.to_dict()), settings)
+                    self.assertEqual(
+                        decode_record(encode_record(settings, QTransform())).settings, settings)
+
+    def test_tail_length_rejects_invalid_values_and_retains_overall_maximum(self):
+        for value in (-1, 991, True, False, 1.5, 650.0, "650", None,
+                      math.nan, math.inf, -math.inf, 10 ** 400):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(SettingsError, "tail_length"):
                     validate_settings(self.record(font_size=2, tail_length=value))

@@ -27,11 +27,14 @@ class PreferencesTests(unittest.TestCase):
 
     def test_preferences_survive_a_new_store_and_preserve_all_bubble_settings(self):
         expected = EditorPreferences(replace(
-            BubbleSettings(), style="Shouting", text="Remember me\nand this line",
+            BubbleSettings(), shape="Tracing", style="Shouting", wrapping="Diamond",
+            text="Remember me\nand this line",
             font="DejaVu Sans", font_size=22, padding=43, outline=7,
             tail_angle=-0.5, tail_length=83, shout_shape="Expressive",
-            thought_nodes=27, shout_seed=1729, thought_seed=2718,
+            thought_nodes=27, thought_blobs=7, shout_nodes=24, shout_seed=1729, thought_seed=2718,
             tail_curve=73, tail_curve_direction="Down",
+            tail_enabled=False, tail_advanced=True, tail_start_angle=-1.2,
+            tail_end_x=150.5, tail_end_y=-80.25,
             oval_custom=True, oval_vertical_padding=25, oval_squareness=80,
             optical_center=True,
             text_styles=(TextStyle(0, 8, bold=True),
@@ -55,6 +58,17 @@ class PreferencesTests(unittest.TestCase):
                 settings.sync()
                 with self.assertRaises(SettingsError):
                     self.store().load()
+
+    def test_long_absolute_tail_survives_typography_paste_and_preferences_reload(self):
+        for locked in (True, False):
+            with self.subTest(locked=locked):
+                target = BubbleSettings(
+                    font_size=65, tail_length=650, tail_angle=-1.2, lock_tail=locked,
+                    text_styles=(TextStyle(0, 5, False, True),))
+                pasted = target.with_style_from(BubbleSettings(font_size=14))
+                expected = EditorPreferences(pasted, background_enabled=False, new_layer=False)
+                self.store().save(expected)
+                self.assertEqual(self.store().load(), expected)
 
     def test_missing_new_fields_keep_fresh_defaults(self):
         settings = QSettings(self.path, QSettings.IniFormat)

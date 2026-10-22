@@ -4,13 +4,17 @@ from typing import Iterable, List, Optional, Tuple
 from xml.sax.saxutils import escape, quoteattr
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath, QPolygonF, QTransform
+from PyQt5.QtGui import (
+    QFont, QFontMetricsF, QPainterPath, QPainterPathStroker, QPolygonF, QTransform,
+)
 
 from .text_runs import TextRun, styled_font
 
 
 MIN_NODES = 8
 MAX_NODES = 64
+MIN_THOUGHT_BLOBS = 1
+MAX_THOUGHT_BLOBS = 10
 
 
 def filled_path_centroid(path: QPainterPath) -> Optional[QPointF]:
@@ -152,26 +156,31 @@ def tail_tip(path: QPainterPath, center: QPointF, angle: float,
 def bubble_path(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
                 style: str, font_size: float, thought_size: int = 100,
                 irregularity: int = 0, seed: int = 0, curve: int = 0,
-                curve_direction: str = "Up") -> QPainterPath:
+                curve_direction: str = "Up", thought_blobs: int = 3,
+                outline_width: float = 0) -> QPainterPath:
     """Compose a direct outline and tail through the selected type's policy."""
     from .registry import resolve_bubble
     from .types import TailParameters
 
     return resolve_bubble(style).compose_tail(
         body, center, tip,
-        TailParameters(font_size, thought_size, irregularity, seed, curve, curve_direction))
+        TailParameters(font_size, thought_size, irregularity, seed, curve, curve_direction,
+                       thought_blobs=thought_blobs, outline_width=outline_width))
 
 
 def _tail_geometry(body: QPainterPath, center: QPointF,
-                   tip: Optional[QPointF]) -> Optional[Tuple[QPointF, QPointF, float]]:
+                   tip: Optional[QPointF],
+                   anchor: Optional[QPointF] = None
+                   ) -> Optional[Tuple[QPointF, QPointF, float]]:
     if tip is None or body.contains(tip):
         return None
-    offset = tip - center
+    offset = tip - (center if anchor is None else anchor)
     distance = math.hypot(offset.x(), offset.y())
     if distance < 1e-6:
         return None
     direction = offset / distance
-    anchor = tail_anchor(body, center, direction)
+    if anchor is None:
+        anchor = tail_anchor(body, center, direction)
     length = math.hypot(tip.x() - anchor.x(), tip.y() - anchor.y())
     if length < 1e-6:
         return None
@@ -184,41 +193,109 @@ def _tail_bend(direction: QPointF, length: float, curve: int,
     return QPointF(-direction.y(), direction.x()) * (length * curve / 100 * sign)
 
 
+def _thought_start(body: QPainterPath, centerline: QPainterPath, radius: float,
+                   clearance: float, start: float, end: float) -> Optional[float]:
+    stroker = QPainterPathStroker()
+    stroker.setWidth(2 * (radius + clearance))
+    stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    obstacle = body.united(stroker.createStroke(body))
+    if obstacle.contains(centerline.pointAtPercent(centerline.percentAtLength(end))):
+        return None
+    if not obstacle.contains(centerline.pointAtPercent(centerline.percentAtLength(start))):
+        return start
+    for _ in range(24):
+        middle = (start + end) / 2
+        if obstacle.contains(centerline.pointAtPercent(centerline.percentAtLength(middle))):
+            start = middle
+        else:
+            end = middle
+    return end
+
+
 def thought_trail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
                   font_size: float, thought_size: int = 100,
                   irregularity: int = 0, seed: int = 0, curve: int = 0,
-                  curve_direction: str = "Up") -> QPainterPath:
-    geometry = _tail_geometry(body, center, tip)
+                  curve_direction: str = "Up",
+                  anchor: Optional[QPointF] = None, thought_blobs: int = 3,
+                  outline_width: float = 0) -> QPainterPath:
+    if type(thought_blobs) is not int or not MIN_THOUGHT_BLOBS <= thought_blobs <= MAX_THOUGHT_BLOBS:
+        raise ValueError("Invalid thought blob count")
+    geometry = _tail_geometry(body, center, tip, anchor)
     if geometry is None or tip is None:
         return QPainterPath(body)
     direction, anchor, length = geometry
     result = QPainterPath(body)
     generator = random.Random("thought-trail-{}".format(seed))
     amount = irregularity / 100
-    perpendicular = QPointF(-direction.y(), direction.x())
     bend = _tail_bend(direction, length, curve, curve_direction)
-    for fraction, scale in ((0.25, 1), (0.58, 0.7), (0.87, 0.4)):
+    centerline = QPainterPath(anchor)
+    centerline.cubicTo(anchor + direction * (length / 3) + bend * (2 / 3),
+                       tip - direction * (length / 3), tip)
+    path_length = centerline.length()
+    intervals = max(1, thought_blobs - 1)
+    spacing_scale = min(1.0, 2 / intervals)
+    blobs: List[Tuple[float, float, float]] = []
+    for index in range(thought_blobs):
+        scale = 1 - 0.6 * index / intervals
         radius = min(font_size * 0.32, length * 0.13) * thought_size / 100 * scale
-        fraction += generator.uniform(-0.04, 0.04) * amount
-        blob_center = anchor + (tip - anchor) * fraction + perpendicular * (
-            radius * generator.uniform(-0.65, 0.65) * amount)
-        blob_center += bend * (2 * fraction * (1 - fraction) ** 2)
+        radius *= spacing_scale
+        # Retain legacy size/rotation draws while replacing random placement.
+        generator.uniform(-0.04, 0.04)
+        generator.uniform(-0.65, 0.65)
         radius_x = radius * (1 + generator.uniform(-0.35, 0.6) * amount)
         radius_y = radius * (1 + generator.uniform(-0.35, 0.6) * amount)
         rotation = generator.uniform(-65, 65) * amount
-        dot = ellipse_path(blob_center, radius_x, radius_y, rotation)
+        blobs.append((radius_x, radius_y, rotation))
+    radii = [max(radius_x, radius_y) for radius_x, radius_y, _ in blobs]
+    outline = min(outline_width, path_length / (2 * thought_blobs + 1))
+    available = path_length - (thought_blobs + 0.5) * outline
+    minimum_gap = min(0.5, available / (2 * (thought_blobs + 1)))
+    diameter_sum = 2 * sum(radii)
+    fit = min(1.0, (available - (thought_blobs + 1) * minimum_gap) / diameter_sum)
+    gap = 0.0
+    start = None
+    for _ in range(32):
+        gap = (path_length - (thought_blobs + 0.5) * outline
+               - diameter_sum * fit) / (thought_blobs + 1)
+        first = radii[0] * fit + outline + gap
+        remaining = (diameter_sum - radii[0]) * fit + (thought_blobs - 0.5) * outline
+        end = path_length - remaining - thought_blobs * minimum_gap
+        start = _thought_start(body, centerline, radii[0] * fit, outline + minimum_gap,
+                               first, end)
+        if start is not None:
+            gap = (path_length - start - remaining) / thought_blobs
+            if gap >= minimum_gap - 1e-8:
+                break
+        start = None
+        fit *= 0.5
+        outline *= 0.5
+        minimum_gap *= 0.5
+    if start is None:
+        raise ValueError("The thought tail cannot fit outside its bubble body")
+    distance = start
+    for index, (radius_x, radius_y, rotation) in enumerate(blobs):
+        if index:
+            distance += (radii[index - 1] + radii[index]) * fit + outline + gap
+        blob_center = centerline.pointAtPercent(centerline.percentAtLength(distance))
+        dot = ellipse_path(blob_center, radius_x * fit, radius_y * fit, rotation)
         result = result.united(dot)
     return result
 
 
 def speech_tail(body: QPainterPath, center: QPointF, tip: Optional[QPointF],
                 font_size: float, curve: int = 0,
-                curve_direction: str = "Up") -> QPainterPath:
-    geometry = _tail_geometry(body, center, tip)
+                curve_direction: str = "Up",
+                anchor: Optional[QPointF] = None) -> QPainterPath:
+    advanced = anchor is not None
+    geometry = _tail_geometry(body, center, tip, anchor)
     if geometry is None or tip is None:
         return QPainterPath(body)
     direction, anchor, length = geometry
-    perpendicular = QPointF(-direction.y(), direction.x())
+    base_direction = direction
+    if advanced:
+        radial = anchor - center
+        base_direction = radial / math.hypot(radial.x(), radial.y())
+    perpendicular = QPointF(-base_direction.y(), base_direction.x())
     left = outline_anchor(body, center, perpendicular) - center
     right = outline_anchor(body, center, -perpendicular) - center
     inside_radius = min(math.hypot(left.x(), left.y()), math.hypot(right.x(), right.y()))

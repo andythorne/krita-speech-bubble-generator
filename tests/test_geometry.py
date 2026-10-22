@@ -5,11 +5,12 @@ import unittest
 from unittest.mock import patch
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
-from PyQt5.QtGui import QPainterPath, QTransform
+from PyQt5.QtGui import QPainterPath, QPainterPathStroker, QTransform
 
 from fake_krita import APP
 from krita_speech_bubble_generator.bubbles.geometry import (
-    body_path, bubble_path, filled_path_centroid, path_data, tail_anchor, tail_tip,
+    body_path, bubble_path, ellipse_path, filled_path_centroid, path_data, tail_anchor, tail_tip,
+    thought_trail,
 )
 from krita_speech_bubble_generator.bubbles.registry import BUBBLE_TYPES, SHOUTING_ALGORITHMS
 
@@ -83,8 +84,7 @@ class GeometryTests(unittest.TestCase):
                         for fraction in (0.01, 0.2, 0.5, 0.9):
                             self.assertTrue(path.contains(anchor + (tip - anchor) * fraction))
                     else:
-                        for fraction in (0.25, 0.58, 0.87):
-                            self.assertTrue(path.contains(anchor + (tip - anchor) * fraction))
+                        self.assertEqual(len(path.toSubpathPolygons()), 4)
 
     def test_no_tail_does_not_change_body(self):
         for style in STYLES:
@@ -109,12 +109,13 @@ class GeometryTests(unittest.TestCase):
                             path = bubble_path(
                                 body, rect.center(), tip, style, 14,
                                 curve=curve, curve_direction=bend)
-                            fractions = ((0.25, 0.58, 0.87) if style == "Thought"
-                                         else (0.2, 0.5, 0.8))
+                            fractions = () if style == "Thought" else (0.2, 0.5, 0.8)
                             for fraction in fractions:
                                 point = anchor + (tip - anchor) * fraction + perpendicular * (
                                     sign * 60 * curve / 100 * 2 * fraction * (1 - fraction) ** 2)
                                 self.assertTrue(path.contains(point))
+                            if style == "Thought":
+                                self.assertEqual(len(path.toSubpathPolygons()), 4)
                             self.assertTrue(path.contains(rect.center()))
                             self.assertTrue(path_data(path).endswith("Z"))
 
@@ -272,7 +273,7 @@ class GeometryTests(unittest.TestCase):
 
     def test_thought_blob_size_increases_radius_without_holes(self):
         rect = QRectF(0, 0, 240, 100)
-        body = body_path(rect, "Thought")
+        body = body_path(rect, "Oval")
         tip = tail_tip(body, rect.center(), 0, 100)
         anchor = tail_anchor(body, rect.center(), QPointF(1, 0))
         first_center = anchor + (tip - anchor) * 0.25
@@ -537,6 +538,120 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(irregular, bubble_path(body, rect.center(), tip, "Thought", 14, 150, 100, 17))
         self.assertNotEqual(irregular, bubble_path(body, rect.center(), tip, "Thought", 14, 150, 100, 99))
         self.assertEqual(body.subtracted(irregular).elementCount(), 0)
+
+    def test_thought_trail_leaves_count_plus_one_equal_edge_gaps(self):
+        rect = QRectF(0, 0, 240, 100)
+        body = body_path(rect, "Oval")
+        tip = tail_tip(body, rect.center(), 0, 100)
+        anchor = tail_tip(body, rect.center(), 0, 0)
+        for outline in (0, 3):
+            for count in range(1, 11):
+                with self.subTest(outline=outline, count=count):
+                    with patch(
+                            "krita_speech_bubble_generator.bubbles.geometry.ellipse_path",
+                            wraps=ellipse_path) as ellipse:
+                        bubble_path(body, rect.center(), tip, "Thought", 14,
+                                    thought_blobs=count, outline_width=outline)
+                    self.assertEqual(ellipse.call_count, count)
+                    occupied = sum(2 * call.args[1] + outline
+                                   for call in ellipse.call_args_list)
+                    gap = (100 - outline / 2 - occupied) / (count + 1)
+                    previous_edge = anchor.x() + outline / 2
+                    for index, call in enumerate(ellipse.call_args_list):
+                        center, radius_x, radius_y, rotation = call.args
+                        visible_radius = radius_x + outline / 2
+                        self.assertAlmostEqual(center.x() - visible_radius - previous_edge,
+                                               gap, delta=0.02)
+                        previous_edge = center.x() + visible_radius
+                        self.assertAlmostEqual(center.y(), anchor.y())
+                        if count == 3:
+                            self.assertEqual(radius_x, 14 * 0.32 * (1, 0.7, 0.4)[index])
+                        self.assertEqual(radius_y, radius_x)
+                        self.assertEqual(rotation, 0)
+                    self.assertAlmostEqual(tip.x() - previous_edge, gap, delta=0.02)
+
+    def test_thought_blob_edge_gaps_follow_arc_length_and_clear_the_body_outline(self):
+        rect = QRectF(0, 0, 240, 100)
+        body = body_path(rect, "Oval")
+        outline = 3
+        stroker = QPainterPathStroker()
+        stroker.setWidth(outline)
+        outlined_body = body.united(stroker.createStroke(body))
+        for start_angle in (0, -0.7):
+            anchor = tail_tip(body, rect.center(), start_angle, 0)
+            tip = tail_tip(body, rect.center(), 0, 200)
+            offset = tip - anchor
+            length = math.hypot(offset.x(), offset.y())
+            direction = offset / length
+            for curve in (0, 100):
+                for bend_direction in ("Up", "Down"):
+                    sign = -1 if bend_direction == "Up" else 1
+                    bend = QPointF(-direction.y(), direction.x()) * (
+                        length * curve / 100 * sign)
+                    for count in (1, 3, 7, 10):
+                        with self.subTest(start=start_angle, curve=curve,
+                                          direction=bend_direction, count=count):
+                            with patch(
+                                    "krita_speech_bubble_generator.bubbles.geometry.ellipse_path",
+                                    wraps=ellipse_path) as ellipse:
+                                thought_trail(
+                                    body, rect.center(), tip, 14, irregularity=100, seed=17,
+                                    curve=curve, curve_direction=bend_direction, anchor=anchor,
+                                    thought_blobs=count, outline_width=outline)
+                            self.assertEqual(ellipse.call_count, count)
+                            parameters = [0.0]
+                            extents = [outline / 2]
+                            for call in ellipse.call_args_list:
+                                point, radius_x, radius_y, rotation = call.args
+                                delta = point - anchor
+                                t = (delta.x() * direction.x()
+                                     + delta.y() * direction.y()) / length
+                                expected = anchor + offset * t + bend * (2 * t * (1 - t) ** 2)
+                                self.assertLess((point - expected).manhattanLength(), 1e-6)
+                                parameters.append(t)
+                                extents.append(max(radius_x, radius_y) + outline / 2)
+                                dot = ellipse_path(point, radius_x, radius_y, rotation)
+                                outlined_dot = dot.united(stroker.createStroke(dot))
+                                self.assertFalse(outlined_body.intersects(outlined_dot))
+                            parameters.append(1.0)
+                            extents.append(0.0)
+                            gaps = []
+                            for interval, (low, high) in enumerate(
+                                    zip(parameters, parameters[1:])):
+                                step = (high - low) / 256
+                                total = 0
+                                for index in range(257):
+                                    t = low + step * index
+                                    velocity = offset + bend * (2 - 8 * t + 6 * t * t)
+                                    weight = 1 if index in (0, 256) else (
+                                        4 if index % 2 else 2)
+                                    total += weight * math.hypot(velocity.x(), velocity.y())
+                                gaps.append(total * step / 3
+                                            - extents[interval] - extents[interval + 1])
+                            if start_angle != 0:
+                                gaps = gaps[1:]
+                            self.assertGreater(min(gaps), 0.45)
+                            self.assertLess(max(gaps) - min(gaps), 0.06)
+
+    def test_thought_trail_count_controls_short_trails_and_is_seeded(self):
+        rect = QRectF(0, 0, 240, 100)
+        body = body_path(rect, "Thought", irregularity=0)
+        for length in (10, 100):
+            tip = tail_tip(body, rect.center(), 0, length)
+            for count in range(1, 11):
+                with self.subTest(length=length, count=count):
+                    regular = bubble_path(body, rect.center(), tip, "Thought", 14,
+                                          thought_blobs=count)
+                    self.assertEqual(len(regular.toSubpathPolygons()), count + 1)
+                    irregular = bubble_path(body, rect.center(), tip, "Thought", 14,
+                                            irregularity=100, seed=17, thought_blobs=count)
+                    self.assertEqual(irregular, bubble_path(
+                        body, rect.center(), tip, "Thought", 14,
+                        irregularity=100, seed=17, thought_blobs=count))
+                    self.assertEqual(body.subtracted(irregular).elementCount(), 0)
+        for count in (0, 11, -1, True, 3.0):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                bubble_path(body, rect.center(), tip, "Thought", 14, thought_blobs=count)
 
     def test_sharp_angle_tails_are_connected_on_elongated_bubbles(self):
         for width, height in ((800, 40), (40, 800), (1000, 10), (10, 1000)):

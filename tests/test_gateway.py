@@ -59,7 +59,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(group.children(), originals)
         self.assertEqual([shape.transformation() for shape in originals], transforms)
         self.assertEqual(loaded.settings.text, "First & second A bold word")
-        self.assertEqual(loaded.settings.style, "Oval")
+        self.assertEqual((loaded.settings.shape, loaded.settings.style), ("Oval", "Sharp"))
         self.assertTrue(loaded.settings.autocenter)
         self.assertTrue(group.isSelected())
         self.assertEqual(self.gateway.load_selected(), loaded)

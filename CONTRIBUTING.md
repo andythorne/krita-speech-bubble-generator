@@ -44,7 +44,8 @@ existing root bootstrap and public docker module remain the entry points.
 | `editor/preferences.py` | Local cross-session editor preferences, independent of document annotations. |
 | `bubbles/settings.py` | Immutable editable settings and version-1 saved-record validation/encoding. |
 | `bubbles/renderer.py` | Text measurement/wrapping and the shared preview/export pipeline. |
-| `bubbles/types.py` | `BubbleType` interface and the five bubble implementations. |
+| `bubbles/types.py` | Rendering-facing `BubbleType` style strategies and the shape/style composition adapter. |
+| `bubbles/shapes.py` | `BubbleShape` interface, shape-owned padding, layout-aware enclosures, convex hulls and subdivision. |
 | `bubbles/shouting_algorithms.py` | `ShoutingAlgorithm` interface and the four contour implementations. |
 | `bubbles/registry.py` | Ordered built-in implementations and identifier lookup. |
 | `bubbles/geometry.py` | Shared path, tail, and SVG mathematics. |
@@ -60,11 +61,19 @@ Dependencies are assembled by the docker shell. Geometry implementations must no
 read widgets, documents, or global random state. UI events carry settings
 snapshots; rendering never generates a new pattern seed.
 
-#### Add a bubble type or shouting algorithm
+#### Add a shape, style or shouting algorithm
 
-Implement `BubbleType` or `ShoutingAlgorithm` and add the implementation to the
-appropriate explicit registry. A shouting bubble composes its selected algorithm;
-do not create a separate bubble subclass for every algorithm. Keep identifiers
+Implement `BubbleShape`, `BubbleType` or `ShoutingAlgorithm` and add the implementation
+to `SHAPES`, `BUBBLE_STYLES` or `SHOUTING_ALGORITHMS`. Shapes own padding and
+enclosure geometry; styles decorate the supplied contour through `decorate`.
+Shapes also supply `project` for normalized decoration coordinates: Oval keeps
+its analytic projection and existing seeded patterns, while polygonal shapes use
+actual contour intersections. Styles must not identify shapes by name or class.
+`BubbleType.layout_body` is the rendering-facing layout boundary, and the
+composition adapter combines one shape with one style. A shouting bubble composes
+its selected algorithm; do not create subclasses for individual combinations.
+`BUBBLE_TYPES` and the original `body_rect`/`body_path` methods remain legacy
+geometry API adapters, not editor selectors. Keep identifiers
 stable because they are saved in documents. Selector order and available
 implementations come from the registries, and conditional controls use capability
 metadata rather than checks for concrete classes or style names.
@@ -74,7 +83,7 @@ SVG output. Distinct strategies can supply different parameters to shared
 mechanics without copying the entire algorithm. Preserve random draw order when
 refactoring: a saved seed must continue producing the same outline.
 
-Enclosure padding is a bubble policy: at zero, retain only necessary outline
+Enclosure padding is a shape policy: at zero, retain only necessary outline
 and shape clearance, not an arbitrary text-size-scaled minimum margin. Measure
 text at the SVG's actual pixel size and include glyph overhangs, accents and
 descenders. Preserve automatic wrapping and baseline spacing.
@@ -82,22 +91,57 @@ Optical vertical centering is opt-in: use the filled glyph-area centroid,
 including holes and overlapping strokes, and expand the enclosure as needed
 without changing wrapping or baseline spacing. Empty lettering retains the
 geometric layout.
-Use `BubbleType.enclose_text` for settings-aware enclosure sizing; the default
-delegates to `body_rect`. Oval, Thought and Shouting share an opt-in custom
-enclosure that fits the padded text to its smooth quarter-curves, with independent
-vertical padding and no 2:1 aspect-ratio cap. Retain each style's original
-proportions when customisation is off, including Oval's 2:1 aspect-ratio cap.
-Share the curve parameters between sizing and drawing. The saved
-`oval_custom`, `oval_vertical_padding` and `oval_squareness` fields apply to all
-three styles; retain these names for compatibility. Keep cloud lobes and spike
-patterns seeded while shaping their underlying contour.
-Tail angles and straight-tail symmetry use the line from the body center to the pointer,
+Use `BubbleShape.layout` for measured enclosure sizing. Its inputs are the centered
+text bounds and each positioned line's bounds, including rich runs, glyph
+overhangs, empty lines and optical centering. Tracing builds a convex hull and
+outward padding; Rounded subdivides angles three times and conservatively expands
+the result to retain the padded enclosure. Square supplies bounded rounded corners
+with straight edge segments and expands enough to retain the padded rectangle.
+Rounded decoration delegates this policy to the shape, without identifying shape
+names or classes. Sharp retains hull vertices. Thought
+and Shouting decorate the same selected contour without changing the lettering.
+Simple horizontal clearance is twice vertical clearance. Advanced padding
+decouples the two axes for every shape; only Oval supports squareness. Disabling
+Advanced resets vertical padding to simple padding and squareness to zero.
+The saved `oval_custom`, `oval_vertical_padding` and `oval_squareness` names are
+retained for compatibility but belong to shape settings, not style settings.
+Keep cloud lobes and spike patterns seeded while shaping their underlying contour.
+
+Wrapping is an independent text policy: `Standard` preserves the original
+automatic wrapper; `Diamond` uses measured rich word widths and symmetric
+short/long/short targets. It only operates in automatic mode, respects paragraph
+breaks, and feeds the same line/run measurement and SVG pipeline as Standard.
+Never reorder words or strip source formatting when changing line breaks.
+Simple tail angles and straight-tail symmetry use the line from the body center to the pointer,
 never the combined body-and-tail bounds or a nearest-edge normal. Intersect that
 ray with the actual body for the tail-length origin; do not snap to supporting
 corners or spikes. Keep dragging and preview/export consistent.
 Curvature offsets rotate with that axis without moving the pointer or changing
 the straight-line tail-length setting. Use the same bend for speech tails and
 thought trails, preserving seeded blob sizes and irregularity.
+Tail length is an absolute value, independent of typography. Controls, dragging,
+saved records and preferences share its 0–990 integer range in `INTEGER_RANGES`;
+font changes and style pastes must not shorten it. This retains the previous
+overall maximum (99 × 10) without coupling a target's tail to a pasted font size.
+Tail enablement is independent of placement: disabling removes the tail and both
+preview handles without clearing settings. Advanced mode stores a separate start
+angle on the actual body contour and an endpoint offset from the body center.
+Unset advanced positions derive from simple placement; the first start drag
+freezes the displayed endpoint. Start and end move independently, and the
+simple compass, length and lock controls are disabled in Advanced mode. Both
+speech and thought composition receive the same optional explicit anchor through
+`TailParameters`; do not add style dispatch for advanced tails. Keep endpoints
+outside the body, including after enclosure changes. Missing saved fields retain
+enabled simple tails, and style transfer preserves all placement and mode fields.
+Thought trail counts use the saved `thought_blobs` setting (1–10, default 3),
+independently of body node counts. Keep seeded blob sizes and rotations stable
+while reserving each blob's diameter and outline along the shared tail curve,
+then dividing the remaining arc length into N+1 equal empty gaps for N blobs.
+Use conservative radii for irregular ellipses, and include the body's half-stroke
+at the start. Enforce body clearance as a minimum for the first center; when it
+must advance, keep subsequent edge gaps and the final tip gap equal. Reduce
+oversized blobs to fit short or crowded trails without moving the selected
+endpoints.
 
 Add contract coverage for each implementation, and specific geometry coverage
 where its behavior differs. A new persisted option may also require settings,
@@ -110,6 +154,11 @@ Keep `rsbg-bubble`, `rsbg-bubble-<id>`, the `rsbg-bubble-` annotation prefix, an
 version-1 record format compatible. Fresh editor defaults and defaults for missing
 legacy fields are deliberately different; do not merge them. Normalize old
 records before loading controls, without mutating the caller's data.
+New records add `shape` and `wrapping`, with `style` containing only the independent
+style. When `shape` is missing, normalize legacy Oval/Square to Sharp on the same
+shape, Rounded/Round to Square/Rounded, and Thought/Shouting to Oval with their
+existing style. Missing wrapping is Standard. Loading is read-only: existing
+artwork adopts the new enclosure sizing only on the next user edit.
 
 New and imported groups use `rsbg-bubble-<uuid>` identities. Save the version-1
 record under the group name as a layer-independent document annotation, as well
@@ -223,6 +272,11 @@ that the first edit keeps its placement, and that saving and reopening retains
 editability. Verify that unrelated artwork and multi-bubble layers are refused.
 Try the tail compass with locked, unlocked and zero-length tails, then drag to
 an angle between presets.
+Toggle tail Enabled off and on with a configured curved tail. In Advanced mode,
+drag each handle, including with canvas background, rotation and scaling; confirm
+that moving the start retains the end, the start follows the edge, and the end
+cannot be placed inside the bubble. Check disabled simple controls, return to
+simple mode, and save/reopen with both a disabled tail and advanced placement.
 
 For merged bubbles, include identical dialogue and empty lettering. Merge
 several generated vector layers, save and reopen, then select and edit each

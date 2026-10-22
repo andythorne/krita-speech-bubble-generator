@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QImage, QMouseEvent, QPaintEvent, QPainter, QPen, QTransform
@@ -9,13 +9,18 @@ from PyQt5.QtWidgets import QWidget
 
 class BubblePreview(QSvgWidget):
     tailMoved = pyqtSignal(QPointF)
+    tailStartMoved = pyqtSignal(QPointF)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(220)
         self.setMouseTracking(True)
-        self.setToolTip("Drag the blue tail handle to point at the speaker.")
+        self.setToolTip(
+            "Drag the blue tail end to point at the speaker. "
+            "In Advanced mode, drag the green start along the bubble edge.")
         self.tip: Optional[QPointF] = None
+        self.tail_start: Optional[QPointF] = None
+        self.drag_start = False
         self.dragging = False
         self.drag_view_box: Optional[QRectF] = None
         self.view_box: QRectF = QRectF()
@@ -32,7 +37,12 @@ class BubblePreview(QSvgWidget):
         self.bubble_transform = QTransform() if transform is None else QTransform(transform)
         self.update()
 
-    def setBubble(self, svg: str, view_box: QRectF, tip: Optional[QPointF]) -> None:
+    def setBubble(self, svg: str, view_box: QRectF, tip: Optional[QPointF],
+                  tail_start: Optional[QPointF] = None) -> None:
+        if self.dragging and (tip is None or (self.drag_start and tail_start is None)):
+            self.dragging = False
+            self.drag_view_box = None
+            self.unsetCursor()
         self.svg_box = QRectF(view_box)
         if self.dragging and self.drag_view_box is not None:
             self.view_box = QRectF(self.drag_view_box)
@@ -42,6 +52,7 @@ class BubblePreview(QSvgWidget):
                 width, height = self.view_box.width(), self.view_box.height()
                 self.view_box.adjust(-width / 2, -height / 2, width / 2, height / 2)
         self.tip = tip
+        self.tail_start = tail_start
         self.load(svg.encode("utf-8"))
         self.update()
 
@@ -89,20 +100,29 @@ class BubblePreview(QSvgWidget):
             raise RuntimeError("The preview SVG renderer is unavailable")
         renderer.render(painter, self.svg_box)
         painter.restore()
-        if self.tip is not None:
-            painter.setPen(QPen(QColor("#1565c0"), 2))
-            painter.setBrush(QColor("#ffffff"))
-            painter.drawEllipse(self.toWidget(self.tip, self.view_box), 6, 6)
+        for point, color in ((self.tail_start, "#2e7d32"), (self.tip, "#1565c0")):
+            if point is not None:
+                painter.setPen(QPen(QColor(color), 2))
+                painter.setBrush(QColor("#ffffff"))
+                painter.drawEllipse(self.toWidget(point, self.view_box), 6, 6)
 
     def mousePressEvent(self, a0: Optional[QMouseEvent]) -> None:
         event = a0
         if event is None:
             return
         if event.button() == Qt.MouseButton.LeftButton and self.tip is not None:
-            handle = self.toWidget(self.tip, self.view_box)
-            if math.hypot(event.pos().x() - handle.x(),
-                          event.pos().y() - handle.y()) <= 14:
+            handles = [(self.tip, False)]
+            if self.tail_start is not None:
+                handles.append((self.tail_start, True))
+            distances: List[Tuple[float, bool]] = []
+            for point, start in handles:
+                handle = self.toWidget(point, self.view_box)
+                distances.append((math.hypot(event.pos().x() - handle.x(),
+                                             event.pos().y() - handle.y()), start))
+            distance, start = min(distances)
+            if distance <= 14:
                 self.dragging = True
+                self.drag_start = start
                 self.drag_view_box = QRectF(self.view_box)
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 event.accept()
@@ -114,7 +134,7 @@ class BubblePreview(QSvgWidget):
         if event is None:
             return
         if self.dragging and self.drag_view_box is not None:
-            self.tailMoved.emit(self.toBubble(QPointF(event.pos()), self.drag_view_box))
+            self._emit_drag(self.toBubble(QPointF(event.pos()), self.drag_view_box))
             event.accept()
         else:
             super().mouseMoveEvent(event)
@@ -129,7 +149,13 @@ class BubblePreview(QSvgWidget):
             self.dragging = False
             self.drag_view_box = None
             self.unsetCursor()
-            self.tailMoved.emit(point)
+            self._emit_drag(point)
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def _emit_drag(self, point: QPointF) -> None:
+        if self.drag_start:
+            self.tailStartMoved.emit(point)
+        else:
+            self.tailMoved.emit(point)

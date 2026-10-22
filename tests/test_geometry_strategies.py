@@ -24,7 +24,7 @@ BASELINE_OUTLINES = {
     ("Oval", "Balanced"): "18a72f29dc7fa29fe42712387f2c8f790ec6716f2a758fab230f4f37b1541142",
     ("Rounded", "Balanced"): "977ec98c323c78ca891fd9a7bdd4d2fed4e10d6050d8b90a840cf7a6c979d2b8",
     ("Square", "Balanced"): "bfed0596b1825d9c402af8d8a26c99bc83557f39308ad91b831ef99ccdc21e05",
-    ("Thought", "Balanced"): "05c761a460ab639815b2662c9a4db1938c9a446dd1466ec27962733ba7e5e9fd",
+    ("Thought", "Balanced"): "4a507c2cd32c4ab512f7aa9b5440dd9c93c5d678176d645f8bc33e6a6f4d81b8",
     ("Shouting", "Balanced"): "fd0fc4f480f47a84cc7aeb140391443d69a24993a0eda3e604708def0b7cc99c",
     ("Shouting", "Angular"): "90a2ea7183c66ddc6a68d5acbb9a117d55267d8103c8280464120eef1ec53667",
     ("Shouting", "Punchy"): "f62a577061c736b1d1e26a5e0790a21759f784a284436f65d0f4e0f45edd422f",

@@ -18,7 +18,7 @@ class LegacyBubbleTests(unittest.TestCase):
         self.assertEqual(settings.text, "First & second A bold word")
         self.assertEqual(settings.font, "Sans Serif")
         self.assertEqual(settings.font_size, 14)
-        self.assertEqual(settings.style, "Oval")
+        self.assertEqual((settings.shape, settings.style), ("Oval", "Sharp"))
         self.assertEqual((settings.fill, settings.stroke, settings.text_color),
                          ("#ffffff", "#112233", "#334455"))
         self.assertEqual(settings.outline, 3)
@@ -77,7 +77,7 @@ class LegacyBubbleTests(unittest.TestCase):
         for path in (rounded, square):
             with self.subTest(path=path):
                 settings = read_legacy_bubble(legacy_svg(path=path)).settings
-                self.assertEqual(settings.style, "Oval")
+                self.assertEqual((settings.shape, settings.style), ("Oval", "Sharp"))
                 self.assertEqual(settings.tail_length, 0)
 
     def test_placement_preserves_rotated_scaled_and_translated_body(self):

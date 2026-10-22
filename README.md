@@ -31,36 +31,44 @@ earlier versions of this fork remain editable without conversion.
 
 1. Open a document and the plugin docker.
 2. Enter dialogue in **Text**. Choose a style and appearance in **Bubble**.
-3. In **Tail**, set a length and choose a direction, or drag the blue handle
-   in the preview to aim the tail.
+3. In **Tail**, leave **Enabled** checked and set a length and direction, or
+   drag the blue handle in the preview. Enable **Advanced** to position the
+   start and end independently.
 4. Choose **New vector layer** or **Selected vector layer**, then click
    **Add on Page**.
 5. Move the bubble on the canvas with Krita's shape-selection tool. Click
    **New bubble** to start another.
 
-The blue handle is an editing aid; it will not appear in your artwork. The
-docker remembers your dialogue and options between sessions. It starts with an
-Oval selected; new bubbles keep the current style, while selecting a saved
-bubble loads its own settings.
+The blue end handle and Advanced mode's green start handle are editing aids;
+they will not appear in your artwork. The docker remembers your dialogue and
+options between sessions. New bubbles keep the current options, while selecting
+a saved bubble loads its own settings.
 
 ![The Krita docker showing a live bubble preview and editing controls](docs/images/example.png)
 
 ## Customize
 
 - **Text:** Choose a font, size and colour. Select words to make them bold or
-  italic, or use **Ctrl+B** and **Ctrl+I**. Automatic wrapping is on by default;
-  use line breaks or **Characters per line** to control it yourself.
-- **Bubble:** Choose Oval, Rounded, Square, Thought or Shouting. Adjust padding,
-  outline and fill. For Oval, Thought and Shouting, enable **Customise shape**
-  for independent horizontal and vertical padding and adjustable squareness.
-  Turn it off to restore the original proportions. Shouting bubbles also offer
-  several spike shapes and adjustable nodes.
-- **Tail:** Use the compass for set directions or drag for any angle. **Lock
-  tail length** keeps the length fixed while aiming; turn it off to change both
-  direction and length. **Curve** bends the tail. Thought trails follow the
-  curve too.
-- **Copy Style:** Copy the appearance settings from one bubble and paste them
-  onto another without replacing its dialogue.
+  italic, or use **Ctrl+B** and **Ctrl+I**. Choose **Standard** automatic wrapping
+  or **Diamond** for short/long/short lines. Turn automatic wrapping off to use
+  **Characters per line**. Enable optical vertical centering to balance the
+  lettering visually.
+- **Bubble:** Combine any **Shape** (Oval, Square or Tracing) with any **Style**
+  (Sharp, Rounded, Thought or Shouting). Tracing follows the text layout;
+  Thought adds cloud lobes and Shouting adds spikes. Adjust fill, outline,
+  padding and the style's irregularity and node controls.
+  **Advanced padding** offers separate horizontal and vertical padding, plus
+  squareness for Oval. Turning it off resets vertical padding and squareness.
+- **Tail:** Use **Enabled** to hide or restore the tail without losing its
+  settings. Aim with the compass or drag the blue end handle. **Lock tail
+  length** keeps the length fixed while aiming; **Curve** bends the tail.
+  Enable **Advanced** to drag the green start along the bubble edge independently
+  of the blue end. The compass and length controls apply only in simple mode.
+  For Thought style, adjust **# of thought blobs** (1-10, default 3) and
+  **Thought blob size**.
+- **Copy Style:** Copy a bubble's appearance and text layout to other bubbles,
+  including tail curvature and thought blob count and size. Dialogue, per-word
+  emphasis and tail placement settings stay unchanged.
 
 The **Text**, **Bubble** and **Tail** tabs group related controls. The preview
 can show nearby canvas artwork while you edit; use **Refresh background** after
@@ -76,6 +84,9 @@ Save your document as `.kra` to keep bubbles editable. Keep each generated
 bubble group intact; manually edited shapes inside it are rebuilt when the
 bubble is updated. Bubbles can be moved between vector layers or included in a
 native vector-layer merge within the same document.
+
+Older bubbles remain editable. Selecting one leaves the artwork unchanged;
+its next edit may update its layout.
 
 ## Import an original Rogudator bubble
 
