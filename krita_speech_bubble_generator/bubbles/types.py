@@ -297,6 +297,12 @@ class ThoughtBubble(BubbleType):
                              thought_blobs=parameters.thought_blobs,
                              outline_width=parameters.outline_width)
 
+    def decorate_shape(self, contour: QPainterPath, parameters: BodyParameters,
+                       shape: BubbleShape, settings: BubbleSettings) -> QPainterPath:
+        # Cloud lobes must not expose sharp enclosure corners between them.
+        return super().decorate_shape(
+            smooth_enclosing(contour), parameters, shape, settings)
+
     def decorate(self, contour: QPainterPath, parameters: BodyParameters,
                  project: Optional[Callable[[QPointF], QPointF]] = None) -> QPainterPath:
         path = QPainterPath(contour)

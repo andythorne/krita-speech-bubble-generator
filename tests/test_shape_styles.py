@@ -104,6 +104,39 @@ class ShapeStyleTests(unittest.TestCase):
         self.assertEqual(len(subdivide(points)), 32)
         self.assertEqual(len(convex_hull(points + [QPointF(5, 5)])), 4)
 
+    def test_thought_cloud_rounds_exposed_polygon_corners_without_moving_text(self):
+        for shape in ("Tracing", "Square"):
+            for text in ("Oh my god...", "Top\nA much wider middle line\nEnd",
+                         "I\nI\nI\nI\nI\nI\nI"):
+                for nodes in (8, 16, 64):
+                    for irregularity, seed in ((0, 0), (100, 17), (100, 2718)):
+                        with self.subTest(shape=shape, text=text, nodes=nodes,
+                                          irregularity=irregularity, seed=seed):
+                            settings = BubbleSettings(
+                                shape=shape, text=text, font="DejaVu Sans",
+                                font_size=30, autocenter=False, tail_enabled=False,
+                                thought_nodes=nodes, thought_irregularity=irregularity,
+                                thought_seed=seed)
+                            sharp = self.renderer.geometry(settings)
+                            thought_settings = replace(settings, style="Thought")
+                            thought = self.renderer.geometry(thought_settings)
+                            self.assertEqual(thought.body_rect, sharp.body_rect)
+                            self.assertEqual(thought.text_rect, sharp.text_rect)
+                            self.assertEqual(thought.lines, sharp.lines)
+                            for index in range(sharp.body.elementCount()):
+                                vertex = sharp.body.elementAt(index)
+                                neighborhood = QPainterPath()
+                                neighborhood.addEllipse(QPointF(vertex.x, vertex.y), 0.1, 0.1)
+                                self.assertTrue(thought.body.contains(neighborhood))
+                            self.assertEqual(
+                                thought.body, self.renderer.geometry(thought_settings).body)
+                            roots = [ET.fromstring(self.renderer.render(thought_settings, preview).svg)
+                                     for preview in (True, False)]
+                            for tag in ("path", "text"):
+                                self.assertEqual(
+                                    [ET.tostring(node) for node in roots[0].iter(SVG + tag)],
+                                    [ET.tostring(node) for node in roots[1].iter(SVG + tag)])
+
     def test_rounded_square_keeps_four_long_straight_edges_and_padded_enclosure(self):
         for text in ("I", "I\nI\nI\nI\nI\nI\nI", "A very wide line of dialogue",
                      BubbleSettings().text):

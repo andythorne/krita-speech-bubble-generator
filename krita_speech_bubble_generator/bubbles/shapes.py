@@ -74,6 +74,9 @@ def subdivide(points: Sequence[QPointF], iterations: int = 3) -> List[QPointF]:
 
 def smooth_enclosing(path: QPainterPath) -> QPainterPath:
     """Subdivision rounds angles; grow back to contain the requested enclosure."""
+    if any(path.elementAt(index).isCurveTo()
+           for index in range(path.elementCount())):
+        return path
     polygon = path.toFillPolygon()
     points = [polygon[index] for index in range(len(polygon) - 1)]
     if len(points) < 3:

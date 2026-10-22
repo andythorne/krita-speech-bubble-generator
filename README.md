@@ -55,7 +55,8 @@ a saved bubble loads its own settings.
   lettering visually.
 - **Bubble:** Combine any **Shape** (Oval, Square or Tracing) with any **Style**
   (Sharp, Rounded, Thought or Shouting). Tracing follows the text layout;
-  Thought adds cloud lobes and Shouting adds spikes. Adjust fill, outline,
+  Thought rounds sharp corners beneath its cloud lobes so no rectangular corners
+  protrude around the text; Shouting adds spikes. Adjust fill, outline,
   padding and the style's irregularity and node controls.
   **Advanced padding** offers separate horizontal and vertical padding, plus
   squareness for Oval. Turning it off resets vertical padding and squareness.
