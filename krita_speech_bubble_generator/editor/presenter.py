@@ -284,14 +284,15 @@ class EditorPresenter(QObject):
         layer_changed = (previous is None or selection.document != previous.document
                          or selection.layer_id != previous.layer_id)
         if (not force and not layer_changed and previous is not None
-                and selection.selected_names == previous.selected_names):
+                and selection.selected_names == previous.selected_names
+                and selection.bubble_names == previous.bubble_names):
             self.sync_placement()
             return
         self.state.observed = selection
         name = None
         if len(selection.selected_names) == 1:
             selected = selection.selected_names[0]
-            if selection.bubble_names.count(selected) == 1:
+            if selected in selection.bubble_names:
                 name = selected
         elif not selection.selected_names and len(selection.bubble_names) == 1:
             only = selection.bubble_names[0]
@@ -299,7 +300,8 @@ class EditorPresenter(QObject):
                                  and self.state.target.shape_name == only):
                 name = only
         identity = selection.document, selection.layer_id, name
-        same = self.state.target is not None and self.state.target.identity == identity
+        same = (self.state.target is not None and self.state.target.identity == identity
+                and selection.bubble_names.count(name) == 1)
         if not same:
             self.flush_live_update()
         if name is None:

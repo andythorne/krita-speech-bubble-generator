@@ -36,6 +36,7 @@ class BubbleSettings:
     style: str = "Sharp"
     shape: str = "Oval"
     wrapping: str = "Standard"
+    text_alignment: str = "Center"
     text: str = "Krita speech bubble generator!"
     font: str = "Segoe Print"
     font_size: int = 14
@@ -88,6 +89,7 @@ class BubbleSettings:
             "style": self.style,
             "shape": self.shape,
             "wrapping": self.wrapping,
+            "text_alignment": self.text_alignment,
             "text": self.text,
             "text_styles": [
                 {"start": run.start, "end": run.end,
@@ -130,7 +132,7 @@ class BubbleSettings:
 
 
 STYLE_FIELDS = (
-    "style", "shape", "wrapping",
+    "style", "shape", "wrapping", "text_alignment",
     "font", "font_size", "text_color", "fill", "stroke", "outline",
     "padding", "oval_custom", "oval_vertical_padding", "oval_squareness",
     "autocenter", "optical_center", "line_length",
@@ -158,6 +160,7 @@ LEGACY_DEFAULTS: Dict[str, SettingValue] = {
     "text_styles": [],
     "shape": "Oval",
     "wrapping": "Standard",
+    "text_alignment": "Center",
     "lock_tail": True,
     "tail_enabled": True,
     "tail_advanced": False,
@@ -288,6 +291,9 @@ def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
     wrapping = _string(values.get("wrapping"), "wrapping")
     if wrapping not in ("Standard", "Diamond"):
         raise SettingsError("Invalid wrapping")
+    text_alignment = _string(values.get("text_alignment"), "text alignment")
+    if text_alignment not in ("Left", "Center", "Right"):
+        raise SettingsError("Invalid text alignment")
     shout_shape = _registry_identifier(
         values.get("shout_shape"), SHOUTING_ALGORITHMS, "Invalid shouting shape")
     tail_curve_direction = _string(values.get("tail_curve_direction"), "tail curve direction")
@@ -319,6 +325,7 @@ def settings_from_dict(data: object, legacy: bool = False) -> BubbleSettings:
         style=style,
         shape=shape,
         wrapping=wrapping,
+        text_alignment=text_alignment,
         text=strings["text"],
         text_styles=_text_styles(values["text_styles"], strings["text"]),
         font=strings["font"],

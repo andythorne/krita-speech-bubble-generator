@@ -1410,7 +1410,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.docker.addOnPage.text(), "Add on Page")
         self.warn.assert_not_called()
 
-    def test_selecting_a_duplicate_named_bubble_stops_editing_without_a_dialog(self):
+    def test_selecting_an_incomplete_duplicate_reports_recovery_failure_without_overwriting(self):
         document, layer, original = self.editTarget()
         duplicate = FakeShape(layer, original.transformation())
         duplicate.setName(original.name())
@@ -1421,7 +1421,8 @@ class EditorTests(unittest.TestCase):
         self.assertIsNone(self.docker.editShapeName)
         self.assertEqual(self.docker.addOnPage.text(), "Add on Page")
         self.assertEqual(layer.items, [original, duplicate])
-        self.warn.assert_not_called()
+        self.warn.assert_called_once()
+        self.assertIn("intact bubble group", self.warn.call_args[0][0])
 
     def test_existing_layer_import_failure_preserves_original_bubbles(self):
         document, layer, group = self.editTarget()

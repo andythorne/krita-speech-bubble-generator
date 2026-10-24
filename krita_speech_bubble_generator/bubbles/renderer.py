@@ -11,7 +11,7 @@ from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import QFont, QFontMetricsF, QPainterPath
 
 from .geometry import bubble_svg, filled_path_centroid, tail_anchor, tail_tip
-from .registry import resolve_bubble
+from .registry import SHAPES, resolve_bubble
 from .settings import INTEGER_RANGES
 from .types import BubbleType, TailParameters
 from .text_runs import TextRun, speech_runs, styled_font
@@ -195,6 +195,7 @@ def diamond_speech_lines(text: str, measure: Callable[[str], float] = len,
 class TextLayout(NamedTuple):
     bounds: QRectF
     line_bounds: List[QRectF]
+    line_origins: List[float]
 
 
 class _TextLayoutKey(NamedTuple):
@@ -206,6 +207,7 @@ class _TextLayoutKey(NamedTuple):
     wrapping: str
     line_length: int
     optical_center: bool
+    text_alignment: str
 
 
 class _MeasuredText(NamedTuple):
@@ -218,13 +220,16 @@ class _MeasuredText(NamedTuple):
 
 def _text_layout(lines: List[str], metrics: QFontMetricsF, font: QFont,
                  size: int, optical_center: bool = False,
-                 runs: Optional[List[List[TextRun]]] = None) -> TextLayout:
+                 runs: Optional[List[List[TextRun]]] = None,
+                 alignment: str = "Center") -> TextLayout:
     half_width = 0.0
     top = -metrics.capHeight()
     bottom = (len(lines) - 1) * size
     lettering = QPainterPath()
     lettering.setFillRule(Qt.FillRule.WindingFill)
     line_bounds: List[QRectF] = []
+    line_origins: List[float] = []
+    outlines: List[QPainterPath] = []
     for index, line in enumerate(lines):
         # Shaped outlines preserve kerning, unlike tightBoundingRect's glyph sums.
         glyphs = QPainterPath()
@@ -243,23 +248,31 @@ def _text_layout(lines: List[str], metrics: QFontMetricsF, font: QFont,
         row_top = min(-metrics.capHeight(), ink.top()) + index * size
         row_bottom = max(0.0, ink.bottom()) + index * size
         line_bounds.append(QRectF(left, row_top, right - left, row_bottom - row_top))
+        line_origins.append(-advance / 2)
         if optical_center:
-            glyphs.translate(-advance / 2, index * size)
-            lettering.addPath(glyphs)
+            outlines.append(glyphs)
+    for index, row in enumerate(line_bounds):
+        shift = (-half_width - row.left() if alignment == "Left" else
+                 half_width - row.right() if alignment == "Right" else 0.0)
+        row.translate(shift, 0)
+        line_origins[index] += shift
+        if optical_center:
+            outlines[index].translate(line_origins[index], index * size)
+            lettering.addPath(outlines[index])
     if optical_center:
         centroid = filled_path_centroid(lettering)
         if centroid is not None:
             # Reserve enough room on both sides of the optical center for all ink.
             half_height = max(centroid.y() - top, bottom - centroid.y())
             top, bottom = centroid.y() - half_height, centroid.y() + half_height
-    return TextLayout(QRectF(-half_width, top, half_width * 2, bottom - top), line_bounds)
+    return TextLayout(QRectF(-half_width, top, half_width * 2, bottom - top),
+                      line_bounds, line_origins)
 
 
 def _text_bounds(lines: List[str], metrics: QFontMetricsF, font: QFont,
                  size: int, optical_center: bool = False,
                  runs: Optional[List[List[TextRun]]] = None) -> QRectF:
-    bounds, _ = _text_layout(lines, metrics, font, size, optical_center, runs)
-    return bounds
+    return _text_layout(lines, metrics, font, size, optical_center, runs).bounds
 
 
 def measured_line_bounds(lines: List[str], metrics: QFontMetricsF, font: QFont,
@@ -279,7 +292,7 @@ class BubbleRenderer:
         key = _TextLayoutKey(
             settings.text, settings.text_styles, font.key(), size,
             settings.autocenter, settings.wrapping, settings.line_length,
-            settings.optical_center)
+            settings.optical_center, SHAPES[settings.shape].text_alignment(settings))
         if self._text_cache is not None and self._text_cache[0] == key:
             return self._text_cache[1]
         metrics = QFontMetricsF(font)
@@ -295,7 +308,7 @@ class BubbleRenderer:
             lines = get_speech_lines(settings.text, settings.line_length)
         runs = speech_runs(settings, lines)
         layout = _text_layout(
-            lines, metrics, font, size, settings.optical_center, runs)
+            lines, metrics, font, size, settings.optical_center, runs, key.text_alignment)
         measured = _MeasuredText(lines, runs, font, metrics, layout)
         # Only retain the most recent lettering, independently of body/tail edits.
         self._text_cache = key, measured
@@ -305,7 +318,7 @@ class BubbleRenderer:
         return self._geometry(settings, self._measure_text(settings))
 
     def _geometry(self, settings: BubbleSettings, measured: _MeasuredText) -> Geometry:
-        bounds, line_bounds = measured.layout
+        bounds, line_bounds, _ = measured.layout
         bubble = self._resolve(settings.style, settings.shout_shape, settings.shape)
         center = bounds.center()
         centered = bounds.translated(-center)
@@ -369,7 +382,9 @@ class BubbleRenderer:
             path, lines, text_rect, measured.font.family(), settings.font_size,
             -measured.layout.bounds.top(),
             settings.fill, settings.stroke, settings.outline,
-            settings.text_color, view_box, measured.runs)
+            settings.text_color, view_box, measured.runs,
+            measured.layout.line_origins
+            if SHAPES[settings.shape].text_alignment(settings) != "Center" else None)
         return RenderResult(svg, view_box, tip, start)
 
     def move_tail(self, settings: BubbleSettings, point: QPointF) -> BubbleSettings:

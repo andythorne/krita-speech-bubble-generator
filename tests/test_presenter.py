@@ -474,7 +474,7 @@ class PresenterTests(unittest.TestCase):
         self.assertEqual(self.presenter.state.target.identity, second.target.identity)
         self.assertEqual(self.view.settings.text, "second")
 
-    def test_selection_poll_ignores_ambiguous_bubble_names_without_a_warning(self):
+    def test_selection_poll_reports_unrecoverable_duplicate_without_binding(self):
         loaded = self.gateway.record("duplicated")
         self.gateway.select(loaded)
         self.gateway.selection = replace(
@@ -483,8 +483,8 @@ class PresenterTests(unittest.TestCase):
             side_effect=GatewayError("Ambiguous bubble"))
         self.presenter.sync_selection()
         self.assertIsNone(self.presenter.state.target)
-        self.assertEqual(self.view.warnings, [])
-        self.gateway.load_selected.assert_not_called()
+        self.assertEqual(self.view.warnings, ["Ambiguous bubble"])
+        self.gateway.load_selected.assert_called_once_with("duplicated")
 
     def test_document_switch_discards_pending_write_instead_of_cross_document_flush(self):
         first = self.bind()

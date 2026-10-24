@@ -97,6 +97,7 @@ def smooth_enclosing(path: QPainterPath) -> QPainterPath:
 @dataclass(frozen=True)
 class ShapeCapabilities:
     squareness: bool = False
+    text_alignment: bool = False
 
 
 class ShapeLayout(NamedTuple):
@@ -109,6 +110,9 @@ class BubbleShape(ABC):
     identifier: str
     label: str
     capabilities = ShapeCapabilities()
+
+    def text_alignment(self, settings: BubbleSettings) -> str:
+        return settings.text_alignment if self.capabilities.text_alignment else "Center"
 
     def padding(self, settings: BubbleSettings) -> Tuple[float, float]:
         vertical = settings.oval_vertical_padding if settings.oval_custom else settings.padding
@@ -169,6 +173,7 @@ class OvalShape(BubbleShape):
 
 class SquareShape(BubbleShape):
     identifier = label = "Square"
+    capabilities = ShapeCapabilities(text_alignment=True)
 
     def rounded_contour(self, contour: QPainterPath, radius: float) -> QPainterPath:
         rect = contour.boundingRect()

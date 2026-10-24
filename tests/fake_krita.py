@@ -1,6 +1,7 @@
 """A substitute host; real Qt still owns widgets, timers, and rendering."""
 
 import os
+from copy import deepcopy
 import sys
 import types
 import xml.etree.ElementTree as ET
@@ -50,6 +51,7 @@ class FakeShape:
         self.z_index = 0
         self.is_visible = True
         self.child_items = []
+        self.svg_element = None
 
     def isSelected(self):
         return self.selected
@@ -71,6 +73,20 @@ class FakeShape:
 
     def children(self):
         return list(self.child_items)
+
+    def toSvg(self):
+        if self.layer.svg:
+            root = ET.fromstring(self.layer.svg)
+            groups = [element for element in root
+                      if element.get("id") == self.name()]
+            if len(groups) == 1:
+                return ET.tostring(groups[0], encoding="unicode")
+        element = (deepcopy(self.svg_element) if self.svg_element is not None
+                   else ET.Element("g"))
+        element.set("id", self.name())
+        for child in self.children():
+            element.append(ET.fromstring(child.toSvg()))
+        return ET.tostring(element, encoding="unicode")
 
     def type(self):
         return "groupshape"
@@ -156,6 +172,21 @@ class FakeLayer:
         path = root.find(".//{http://www.w3.org/2000/svg}path")
         baseline = QTransform.fromTranslate(-len(path.attrib["d"]) / 100, -7)
         shape = FakeShape(self, baseline)
+        if root.tag.rsplit("}", 1)[-1] == "g":
+            shape.setName(root.get("id", SHAPE_NAME))
+        for element in root.iter():
+            if element.tag.rsplit("}", 1)[-1] not in ("path", "text"):
+                continue
+            child = FakeShape(self, QTransform())
+            child.type = lambda: "pathshape"
+            child.setName(element.get("id", "shape"))
+            child.svg_element = deepcopy(element)
+            if root.tag.rsplit("}", 1)[-1] != "g":
+                matrix = QTransform.fromScale(72 / 300, 72 / 300) * baseline.inverted()[0]
+                child.svg_element.set("transform", "matrix({} {} {} {} {} {})".format(
+                    matrix.m11(), matrix.m12(), matrix.m21(), matrix.m22(),
+                    matrix.dx(), matrix.dy()))
+            shape.child_items.append(child)
         self.items.append(shape)
         return [shape]
 

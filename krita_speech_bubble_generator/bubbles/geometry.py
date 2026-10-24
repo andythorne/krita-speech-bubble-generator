@@ -352,20 +352,25 @@ def bubble_svg(path: QPainterPath, lines: Iterable[str], text_rect: QRectF,
                font_family: str, font_size: float, baseline_offset: float,
                fill: str, stroke: str, stroke_width: float, text_color: str,
                view_box: QRectF,
-               runs: Optional[List[List[TextRun]]] = None) -> str:
+               runs: Optional[List[List[TextRun]]] = None,
+               line_origins: Optional[List[float]] = None) -> str:
     text: List[str] = []
     baseline = text_rect.top() + baseline_offset
     for index, line in enumerate(lines):
         content = escape(line)
         anchor = "middle"
         x = text_rect.center().x()
+        if line_origins is not None:
+            x += line_origins[index]
+            anchor = "start"
         if runs is not None and any(run.bold or run.italic for run in runs[index]):
             widths: List[float] = []
             font = QFont(font_family)
             font.setPixelSize(round(font_size))
             for run in runs[index]:
                 widths.append(QFontMetricsF(styled_font(font, run)).horizontalAdvance(run.text))
-            x -= sum(widths) / 2
+            if line_origins is None:
+                x -= sum(widths) / 2
             anchor = "start"
             spans: List[str] = []
             offset = x

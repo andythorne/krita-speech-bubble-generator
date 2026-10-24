@@ -61,6 +61,73 @@ def rendered_text_centroid_y(rendered):
 
 
 class BubbleRendererTests(unittest.TestCase):
+    def test_square_alignment_uses_shared_safe_edges_for_plain_and_rich_lines(self):
+        text = "Wide lettering\nf\n\nlast"
+        for style in BUBBLE_STYLES:
+            for alignment in ("Left", "Center", "Right"):
+                for styled in (False, True):
+                    for optical in (False, True):
+                        settings = BubbleSettings(
+                            shape="Square", style=style, text=text, font="DejaVu Sans",
+                            font_size=35, autocenter=False, padding=0,
+                            text_alignment=alignment, optical_center=optical,
+                            text_styles=(TextStyle(0, len(text), True, True),) if styled else ())
+                        with self.subTest(style=style, alignment=alignment,
+                                          styled=styled, optical=optical):
+                            geometry = self.renderer.geometry(settings)
+                            preview = ET.fromstring(self.renderer.render(settings, True).svg)
+                            exported = ET.fromstring(self.renderer.render(settings).svg)
+                            nodes = list(exported.iter(SVG + "text"))
+                            self.assertEqual(
+                                [ET.tostring(node) for node in preview.iter(SVG + "text")],
+                                [ET.tostring(node) for node in nodes])
+                            runs = speech_runs(settings, geometry.lines)
+                            font = QFont(settings.font)
+                            font.setPixelSize(settings.font_size)
+                            font.setBold(styled)
+                            font.setItalic(styled)
+                            metrics = QFontMetricsF(font)
+                            for node, line, row in zip(nodes, geometry.lines, runs):
+                                x = float(node.attrib["x"])
+                                y = float(node.attrib["y"])
+                                advance = sum(metrics.horizontalAdvance(run.text) for run in row)
+                                if node.attrib["text-anchor"] == "middle":
+                                    x -= advance / 2
+                                ink = glyph_bounds(font, line).translated(x, y)
+                                if not ink.isEmpty():
+                                    self.assertTrue(geometry.text_rect.adjusted(
+                                        -1e-6, -1e-6, 1e-6, 1e-6).contains(ink))
+                                left = min(x, ink.left()) if line else x
+                                right = max(x + advance, ink.right()) if line else x
+                                if alignment == "Left":
+                                    self.assertAlmostEqual(left, geometry.text_rect.left())
+                                elif alignment == "Right":
+                                    self.assertAlmostEqual(right, geometry.text_rect.right())
+                                else:
+                                    self.assertAlmostEqual(x + advance / 2,
+                                                           geometry.text_rect.center().x())
+
+    def test_alignment_respects_wrapping_and_only_affects_capable_shapes(self):
+        for shape in SHAPES:
+            for automatic, length in ((True, 0), (False, 8), (False, 0)):
+                settings = replace(self.settings, shape=shape, autocenter=automatic,
+                                   line_length=length, wrapping="Diamond")
+                centered = self.renderer.render(settings)
+                lines = self.renderer.geometry(settings).lines
+                for alignment in ("Left", "Right"):
+                    variant = replace(settings, text_alignment=alignment)
+                    actual = self.renderer.render(variant)
+                    self.assertEqual(self.renderer.geometry(variant).lines, lines)
+                    self.assertEqual(actual, BubbleRenderer().render(variant))
+                    if not SHAPES[shape].capabilities.text_alignment:
+                        self.assertEqual(actual, centered)
+                self.assertEqual(self.renderer.render(settings), centered)
+        for text in ("", "\n", "   "):
+            for alignment in ("Left", "Right"):
+                settings = BubbleSettings(shape="Square", text=text, text_alignment=alignment)
+                self.assertTrue(QSvgRenderer(QByteArray(
+                    self.renderer.render(settings).svg.encode())).isValid())
+
     def test_emphasis_survives_word_wrapping_whitespace_and_unicode(self):
         text = "\U0001f600\talpha   beta\n\nalpha beta"
         start = text.index("beta")

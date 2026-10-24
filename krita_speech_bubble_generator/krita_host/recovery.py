@@ -1,7 +1,7 @@
 """Explicit recovery of generated groups detached from their saved layer."""
 
 import re
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 import xml.etree.ElementTree as ET
 
 from PyQt5.QtCore import QByteArray, QRectF, QUuid
@@ -9,10 +9,43 @@ from PyQt5.QtGui import QTransform
 from PyQt5.QtSvg import QSvgRenderer
 
 from ..bubbles.settings import (
-    ANNOTATION_PREFIX, SHAPE_NAME, SavedBubble, TransformValues, decode_record, transform_values,
+    ANNOTATION_PREFIX, SHAPE_NAME, BubbleSettings, SavedBubble, SettingsError,
+    TransformValues, decode_record, encode_record, transform_values,
 )
 from ..editor.contracts import GatewayError
-from .contracts import Document
+from .contracts import Document, Shape
+
+
+SETTINGS_NAME = "rsbg-settings-"
+
+
+def group_settings(shape: Shape) -> Optional[BubbleSettings]:
+    names = [child.name() for child in shape.children()
+             if child.name().startswith(SETTINGS_NAME)]
+    if not names:
+        return None
+    if len(names) != 1:
+        raise SettingsError("The bubble contains multiple embedded settings records.")
+    match = re.fullmatch(re.escape(SETTINGS_NAME) + r"([0-9a-f]+)-end\d*", names[0])
+    if match is None:
+        raise SettingsError("The bubble's embedded settings record is invalid.")
+    try:
+        data = bytes.fromhex(match[1])
+    except ValueError as error:
+        raise SettingsError("The bubble's embedded settings record is invalid.") from error
+    return decode_record(data).settings
+
+
+def store_group_settings(shape: Shape, settings: BubbleSettings) -> None:
+    children = shape.children()
+    if children:
+        # Krita preserves shape names through clipboard SVG, but discards arbitrary
+        # SVG metadata. An existing child's name carries data without extra artwork.
+        carrier = next((child for child in children
+                        if child.name().startswith(SETTINGS_NAME)), children[0])
+        name = SETTINGS_NAME + encode_record(settings, QTransform()).hex() + "-end"
+        if carrier.name() != name:
+            carrier.setName(name)
 
 
 def normalized_text(text: str) -> str:
@@ -85,8 +118,19 @@ class DetachedGroup(NamedTuple):
         )
 
 
-def detached_group(svg: str, name: str, require_text: bool = True) -> DetachedGroup:
-    groups = [element for element in parse_svg(svg)
+def detached_group(svg: str, name: str, require_text: bool = True,
+                   fragment: bool = False) -> DetachedGroup:
+    if fragment:
+        # Shape.toSvg exports a fragment whose namespace declarations normally
+        # belong to the enclosing layer SVG.
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:xlink="http://www.w3.org/1999/xlink" '
+            'xmlns:krita="http://krita.org/namespaces/svg/krita" '
+            'xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd">'
+            + svg + "</svg>")
+    root = parse_svg(svg)
+    groups = [element for element in ([root] if tag(root) == "g" else root)
               if tag(element) == "g" and element.get("id") == name]
     if len(groups) != 1:
         raise GatewayError("Cannot uniquely locate the selected bubble group in the layer SVG.")
@@ -99,16 +143,6 @@ def detached_group(svg: str, name: str, require_text: bool = True) -> DetachedGr
     if require_text and not text:
         raise GatewayError("A bubble without lettering cannot be matched to saved settings.")
     return DetachedGroup(text, read_outline(paths[0]))
-
-
-def has_detached_records(document: Document) -> bool:
-    for key in document.annotationTypes():
-        match = re.fullmatch(re.escape(ANNOTATION_PREFIX) + r"(\{[^{}]+\})(?:-.+)?", key)
-        if match is not None:
-            layer_id = QUuid(match[1])
-            if not layer_id.isNull() and document.nodeByUniqueID(layer_id) is None:
-                return True
-    return False
 
 
 def matching_records(document: Document, name: str, text: str) -> List[SavedBubble]:

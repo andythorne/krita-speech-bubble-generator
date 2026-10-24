@@ -140,7 +140,7 @@ class TextLayoutPerformanceTests(unittest.TestCase):
 
     def test_every_lettering_setting_invalidates_the_cache(self):
         settings = BubbleSettings(text="alpha beta gamma\ndelta", font="DejaVu Sans",
-                                  wrapping="Diamond")
+                                  shape="Square", wrapping="Diamond")
         variants = {
             "text": "other words\n\nend",
             "text_styles": (TextStyle(0, 10, True, True),),
@@ -150,6 +150,7 @@ class TextLayoutPerformanceTests(unittest.TestCase):
             "wrapping": "Standard",
             "line_length": 7,
             "optical_center": True,
+            "text_alignment": "Right",
         }
         for field, value in variants.items():
             with self.subTest(field=field):
@@ -177,7 +178,7 @@ class TextLayoutPerformanceTests(unittest.TestCase):
             thought_irregularity=75, thought_nodes=24, thought_seed=99)
         lettering_fields = {
             "text", "text_styles", "font", "font_size", "autocenter", "wrapping",
-            "line_length", "optical_center",
+            "line_length", "optical_center", "text_alignment",
         }
         self.assertEqual(set(variants) | lettering_fields,
                          {field.name for field in fields(BubbleSettings)})

@@ -16,7 +16,7 @@ from krita_speech_bubble_generator.bubbles.settings import (
 class SettingsTests(unittest.TestCase):
     def test_style_transfer_copies_text_appearance_bubble_options_and_tail_curvature(self):
         source = BubbleSettings(
-            shape="Tracing", style="Shouting", wrapping="Diamond",
+            shape="Tracing", style="Shouting", wrapping="Diamond", text_alignment="Right",
             text="Source", font="Serif", font_size=28,
             text_color="#112233", text_styles=(TextStyle(0, 3, True),),
             fill="#123456", stroke="#654321", outline=7, padding=65,
@@ -30,7 +30,8 @@ class SettingsTests(unittest.TestCase):
         target = replace(BubbleSettings(), shout_seed=123, thought_seed=456,
                          text_styles=(TextStyle(0, 5, False, True),))
         style_fields = (
-            "style", "shape", "wrapping", "fill", "stroke", "outline", "padding", "oval_custom",
+            "style", "shape", "wrapping", "text_alignment",
+            "fill", "stroke", "outline", "padding", "oval_custom",
             "oval_vertical_padding", "oval_squareness", "shout_shape", "shout_nodes",
             "shout_irregularity", "thought_nodes", "thought_irregularity",
             "tail_curve", "tail_curve_direction", "font", "font_size",
@@ -81,6 +82,26 @@ class SettingsTests(unittest.TestCase):
         values["baseline"] = [1, 0, 0, 1, -7, 12]
         values.update(changes)
         return values
+
+    def test_text_alignment_defaults_round_trips_and_validates(self):
+        self.assertEqual(BubbleSettings().text_alignment, "Center")
+        values = self.record(style="Square")
+        del values["text_alignment"]
+        del values["shape"]
+        original = deepcopy(values)
+        for legacy in (False, True):
+            loaded = settings_from_dict(values, legacy=legacy)
+            self.assertEqual((loaded.shape, loaded.text_alignment), ("Square", "Center"))
+        self.assertEqual(decode_record(json.dumps(values).encode()).settings.text_alignment,
+                         "Center")
+        self.assertEqual(values, original)
+        for alignment in ("Left", "Center", "Right"):
+            settings = BubbleSettings(shape="Square", text_alignment=alignment)
+            self.assertEqual(decode_record(encode_record(settings, QTransform())).settings,
+                             settings)
+        for alignment in ("left", "Justify", "", None, True, 1, []):
+            with self.subTest(alignment=alignment), self.assertRaises(SettingsError):
+                settings_from_dict(self.record(text_alignment=alignment), legacy=True)
 
     def test_tail_placement_round_trips_without_becoming_a_copied_style(self):
         settings = BubbleSettings(

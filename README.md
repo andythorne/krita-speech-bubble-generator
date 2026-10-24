@@ -52,7 +52,9 @@ a saved bubble loads its own settings.
   italic, or use **Ctrl+B** and **Ctrl+I**. Choose **Standard** automatic wrapping
   or **Diamond** for short/long/short lines. Turn automatic wrapping off to use
   **Characters per line**. Enable optical vertical centering to balance the
-  lettering visually.
+  lettering visually. For Square shapes, choose **Text alignment (Square)**:
+  **Left**, **Center** (the default) or **Right**, independently of wrapping.
+  Other shapes keep centered text. Older saved bubbles default to Center.
 - **Bubble:** Combine any **Shape** (Oval, Square or Tracing) with any **Style**
   (Sharp, Rounded, Thought or Shouting). Tracing follows the text layout;
   Thought rounds sharp corners beneath its cloud lobes so no rectangular corners
@@ -83,8 +85,20 @@ Changes in the docker update it automatically after a short pause. Use
 
 Save your document as `.kra` to keep bubbles editable. Keep each generated
 bubble group intact; manually edited shapes inside it are rebuilt when the
-bubble is updated. Bubbles can be moved between vector layers or included in a
-native vector-layer merge within the same document.
+bubble is updated. Copy and paste whole bubble groups between documents or vector
+layers, or include them in a native vector-layer merge. Select the pasted group
+to keep editing its dialogue, appearance and tail independently of the original.
+Multiple bubbles can share a vector layer: select one group at a time to edit it;
+other bubbles and artwork on that layer are left alone.
+
+Newly created or edited bubbles carry their editing settings with the group.
+Before copying an older bubble, select it in its original document with this
+version of the plugin so its settings can travel too. If a tagged bubble does not
+reconnect automatically, select its intact group and choose **Import > Recover
+selected bubble**. Recovery works on shared layers, including bubbles with
+identical or empty dialogue when their settings are available. Missing or
+ambiguous older settings are refused rather than guessed; if an older paste has
+lost its settings, select the original bubble and copy it again.
 
 Older bubbles remain editable. Selecting one leaves the artwork unchanged;
 its next edit may update its layout.

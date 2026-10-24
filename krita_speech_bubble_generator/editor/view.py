@@ -145,6 +145,15 @@ class BubbleEditorView(QScrollArea):
             "Diamond balances automatic lines from short to long to short. "
             "Explicit line breaks are retained. Manual characters per line is unchanged.")
         speech.addWidget(self.wrapping)
+        self.textAlignmentLabel = QLabel("Text alignment (Square)")
+        speech.addWidget(self.textAlignmentLabel)
+        self.textAlignment = QComboBox()
+        self.textAlignment.addItems(("Left", "Center", "Right"))
+        self.textAlignment.setCurrentText(self._settings.text_alignment)
+        self.textAlignment.setToolTip(
+            "Align lines within the text area of Square bubbles. "
+            "Other shapes keep centered lettering.")
+        speech.addWidget(self.textAlignment)
         self.opticalCenter = QCheckBox("Optical vertical centering")
         self.opticalCenter.setToolTip(
             "Balance the visual weight of the lettering instead of equal top and bottom gaps. "
@@ -379,7 +388,9 @@ class BubbleEditorView(QScrollArea):
         self.importInstructions.setWordWrap(True)
         self.recoverBubble = QPushButton("Recover selected bubble")
         self.recoveryInstructions = QLabel(
-            "Moving bubbles and merging vector layers now keep bubbles editable automatically. "
+            "Copying intact bubbles between documents or vector layers keeps them editable. "
+            "Select one bubble group to edit or recover it, even on a layer with other bubbles. "
+            "For an older bubble, select it in its original document before copying it. "
             "Older merged bubbles reconnect when selected if their saved settings match uniquely. "
             "To retry explicitly, select one generated bubble and click Recover selected bubble. "
             "Older recovery uses settings from removed layers in this document. Ambiguous or "
@@ -426,6 +437,7 @@ class BubbleEditorView(QScrollArea):
         self.autocenter.toggled.connect(lambda: self._emit("autocenter"))
         self.autocenter.toggled.connect(self.wrapping.setEnabled)
         self.wrapping.currentIndexChanged.connect(lambda: self._emit("wrapping"))
+        self.textAlignment.currentIndexChanged.connect(lambda: self._emit("text_alignment"))
         self.opticalCenter.toggled.connect(lambda: self._emit("optical_center"))
         self.lockTailLength.toggled.connect(self.tailLengthControls.setEnabled)
         self.lockTailLength.toggled.connect(lambda: self._emit("lock_tail"))
@@ -564,6 +576,9 @@ class BubbleEditorView(QScrollArea):
         self._emit("shape")
 
     def _update_padding_label(self) -> None:
+        alignment = SHAPES[self.bubbleShape.currentText()].capabilities.text_alignment
+        self.textAlignment.setEnabled(alignment)
+        self.textAlignmentLabel.setEnabled(alignment)
         custom = self.ovalGroup.isChecked()
         if custom:
             self.advancedPaddingLayout.insertWidget(1, self.paddingControls)
@@ -612,6 +627,7 @@ class BubbleEditorView(QScrollArea):
             self._settings, **{field: control.value() for field, control in self._numbers.items()},
             style=self.bubbleType.currentText(), text=self.bubbleText.toPlainText(),
             shape=self.bubbleShape.currentText(), wrapping=self.wrapping.currentText(),
+            text_alignment=self.textAlignment.currentText(),
             text_styles=self.bubbleText.text_styles(),
             font=self.speechFont.currentFont().family(), fill=self.bubbleColor.name(),
             stroke=self.outlineColor.name(), text_color=self.speechFontColor.name(),
@@ -649,6 +665,8 @@ class BubbleEditorView(QScrollArea):
                 self._update_padding_label()
             if "wrapping" in changed:
                 self.wrapping.setCurrentText(settings.wrapping)
+            if "text_alignment" in changed:
+                self.textAlignment.setCurrentText(settings.text_alignment)
             if "text" in changed and self.bubbleText.toPlainText() != settings.text:
                 self.bubbleText.setPlainText(settings.text)
             if "text_styles" in changed or "text" in changed:

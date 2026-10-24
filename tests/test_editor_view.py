@@ -20,6 +20,29 @@ from krita_speech_bubble_generator.editor.view import BubbleEditorView
 
 
 class EditorViewTests(unittest.TestCase):
+    def test_square_alignment_emits_loads_and_retains_choice_across_shapes(self):
+        self.assertEqual(self.view.textAlignment.currentText(), "Center")
+        self.assertFalse(self.view.textAlignment.isEnabled())
+        self.view.bubbleShape.setCurrentText("Square")
+        self.assertTrue(self.view.textAlignment.isEnabled())
+        edits = QSignalSpy(self.view.edited)
+        for alignment in ("Left", "Right", "Center"):
+            self.view.textAlignment.setCurrentText(alignment)
+            self.assertEqual(edits[-1][1], ("text_alignment",))
+            self.assertEqual(edits[-1][0].text_alignment, alignment)
+        settings = replace(self.view.initial_settings(), text_alignment="Right")
+        edits = QSignalSpy(self.view.edited)
+        self.assertEqual(self.view.load_settings(settings), settings)
+        self.assertEqual(len(edits), 0)
+        for shape in ("Oval", "Tracing", "Square"):
+            self.view.bubbleShape.setCurrentText(shape)
+            self.assertEqual(self.view.textAlignment.isEnabled(), shape == "Square")
+            self.assertEqual(self.view.initial_settings().text_alignment, "Right")
+            self.assertEqual(edits[-1][1], ("shape",))
+        self.assertEqual(self.view.reflect_settings(
+            replace(settings, text_alignment="Left")).text_alignment, "Left")
+        self.assertEqual(self.view.textAlignment.currentText(), "Left")
+
     def select_text(self, start, end):
         cursor = self.view.bubbleText.textCursor()
         cursor.setPosition(start)

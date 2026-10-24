@@ -51,7 +51,7 @@ existing root bootstrap and public docker module remain the entry points.
 | `bubbles/geometry.py` | Shared path, tail, and SVG mathematics. |
 | `krita_host/gateway.py` | Native document reads/writes, selection resolution, annotations, and placement. |
 | `krita_host/legacy.py` | Conservative, opt-in recovery of one original-plugin outline and its text from SVG. |
-| `krita_host/recovery.py` | Stable group-ID recognition, conservative old-record matching, and placement reconstruction after reparenting. |
+| `krita_host/recovery.py` | Group-ID recognition, portable group settings, conservative old-record matching, and placement reconstruction after reparenting. |
 | `krita_host/canvas_context.py` | Canvas transforms and temporary background snapshots. |
 | `editor/preview.py` | Preview drawing, coordinate mapping, and tail-handle input. |
 | `editor/tail_compass.py`, `editor/text_resize_handle.py`, `editor/wheel_guard.py` | Local tail presets, text-resize and scroll interactions. |
@@ -165,6 +165,18 @@ record under the group name as a layer-independent document annotation, as well
 as the legacy layer-scoped annotation key. Never match current bubbles by their
 lettering: duplicate and empty text must survive repeated merges. Load old
 layer-scoped records and upgrade their group identity without redrawing.
+Recognize intact generated group IDs even when the current document has no
+annotations. New groups and writable loaded groups also carry the version-1
+settings record in an existing child's name (`rsbg-settings-<hex record>-end`).
+Krita retains shape names through clipboard SVG but does not retain arbitrary
+SVG metadata. Do not add invisible artwork or change the stable group ID to carry
+settings. Permit the numeric suffix Krita adds to colliding SVG IDs. Embedded
+settings belong to that exact group, not to matching dialogue or another copy's
+document annotation. Reconstruct a pasted group's baseline from its own SVG;
+use individual shape export so duplicate names on a shared layer cannot redirect
+recovery to a sibling. Assign a fresh stable identity when another group in the
+document already uses it. Selection observation remains read-only; portable
+settings are attached when loading, creating or updating, not when polling.
 The optional version-1 `layer_id` field identifies the layer whose coordinate
 system the saved baseline belongs to, not the bubble's identity. It prevents
 stale layer-scoped records from winning when a bubble moves back to an old layer.
@@ -285,6 +297,17 @@ after typing a pending edit. Check that selection alone leaves artwork untouched
 the first edit retains placement and sibling artwork, and reopening keeps
 editing enabled. Try older already-merged bubbles too: unique saved settings
 should reconnect automatically, while ambiguous or missing settings are refused.
+
+Copy whole bubble groups between documents and between vector layers, including
+multiple bubbles on a shared layer, identical dialogue and empty lettering. Paste
+another copy on the original layer and edit each copy independently. Repeat with
+rotated/scaled bubbles and different document resolutions. Save/reopen the
+destination after closing the source, then recover and edit individual groups.
+Check that per-word emphasis, tail settings and seeded outlines survive, the
+first edit keeps placement, and sibling artwork, selection and stacking remain
+intact. For older groups, select the original before copying to attach portable
+settings without redrawing it. These clipboard, repaint and persistence checks
+require native Krita; the substitute-host tests do not establish them.
 
 Add regression coverage for changed behaviour where practical. Update user
 documentation when controls or workflows change, and describe your changes and
